@@ -59,6 +59,24 @@ baro はそれを集計して、残り時間・終了予定時刻・進捗のバ
 
 ## インストール
 
+### 方法 1: Claude Code にプロンプトを貼る
+
+Claude Code を開いて、次の文をそのまま貼ってください。Claude がインストールから設定まで行います。
+
+```
+baro（https://github.com/akkijp/baro）を入れて、Claude Code につないでください。
+1. `uv tool install git+https://github.com/akkijp/baro` を実行する。uv が無ければ `pipx install git+https://github.com/akkijp/baro`、どちらも無ければ `python3 -m pip install --user git+https://github.com/akkijp/baro`。
+2. `which baro` で入った場所を確認する。PATH に無ければ、入った場所をフルパスで使う。
+3. `baro setup --apply` を実行する（~/.claude/settings.json を書き換える。バックアップは自動で取られる）。
+4. `baro rules --install` を実行する（~/.claude/CLAUDE.md にルールを追記する）。
+5. `baro doctor` を実行して、すべて OK か確認する。NG があれば直す。
+6. 最後に、設定を反映するには Claude Code を起動し直す必要があることを伝える。
+```
+
+終わったら Claude Code を起動し直してください。次に 3 手順以上の依頼をすると、画面の下に残り時間が出ます。
+
+### 方法 2: 手で入れる
+
 ```sh
 # uv の場合
 uv tool install git+https://github.com/akkijp/baro
@@ -78,7 +96,9 @@ baro rules --install  # ~/.claude/CLAUDE.md に Claude 向けのルールを追�
 baro doctor           # 設定の確認
 ```
 
-`baro setup --apply` がすることは 3 つです。
+設定を反映するには Claude Code を起動し直してください。
+
+### `baro setup --apply` がすること
 
 - `statusLine` を `baro statusline` にする。すでに別の statusLine があれば、その command を `~/.claude/baro/config.json` に保存し、同じ入力を渡し続けます（既存の表示は baro の行に置き換わります）。
 - `Stop` フックに `baro hook stop` を追加する（Claude の応答が終わったら計測を止める）。
@@ -87,8 +107,6 @@ baro doctor           # 設定の確認
 既存のフックはそのまま残ります。
 
 `baro rules --install` が追記するルールは `baro rules` で確認できます。CLAUDE.md を自分で管理しているなら、その文面を好きな場所に貼ってください。
-
-設定を反映するには Claude Code を起動し直してください。
 
 ## 使い方
 
