@@ -8,7 +8,7 @@ import sys
 import time
 from pathlib import Path
 
-from . import clock, render, store
+from . import calib, clock, render, store
 
 HIDE_DONE_AFTER_SEC = 600  # 終わった計画は 10 分でステータスラインから消す
 
@@ -64,7 +64,7 @@ def statusline(args) -> None:
         if data is None:
             return
         at = clock.now()
-        r = clock.ratio(store.read_history())
+        r = calib.ratios()
         if clock.summarize(data, at, r).complete:
             updated = clock.parse(data.get("updated") or data["created"])
             if (at - updated).total_seconds() > HIDE_DONE_AFTER_SEC:
@@ -99,7 +99,7 @@ def hook(args) -> None:
         if data is None:
             return
         at = clock.now()
-        r = clock.ratio(store.read_history())
+        r = calib.ratios()
         if clock.summarize(data, at, r).complete:
             return
         if args.event == "stop":
@@ -157,6 +157,7 @@ def setup(args) -> None:
             if len(kept) != len(entries):
                 settings["hooks"][event] = kept
                 changes.append(f"hooks.{event} から baro を削除する")
+        skill = "remove" if calib.skill_path().exists() else None
     else:
         baro = _baro_bin()
         cur = settings.get("statusLine") or {}
@@ -172,15 +173,29 @@ def setup(args) -> None:
             if not _has_baro_hook(entries):
                 entries.append({"hooks": [{"type": "command", "command": f"{baro} hook {arg}", "timeout": 5}]})
                 changes.append(f"hooks.{event} に {baro} hook {arg} を追加する（既存のフックはそのまま）")
+        skill = None if calib.skill_installed() else "install"
+
+    settings_changed = bool(changes)
+    if skill == "install":
+        changes.append(f"{calib.skill_path().parent} に /{calib.SKILL_NAME} スキル（見込みの補正を詰める）を入れる")
+    elif skill == "remove":
+        changes.append(f"{calib.skill_path().parent}（/{calib.SKILL_NAME} スキル）を削除する")
 
     if not changes:
         print("変更はありません")
         return
-    print(f"{path}:")
+    print(f"{path}:" if settings_changed else "変更:")
     for c in changes:
         print(f"  ・{c}")
     if not args.apply:
         print("（まだ書き換えていません。--apply を付けると書き換えます）")
+        return
+    if skill == "install":
+        calib.install_skill()
+    elif skill == "remove":
+        calib.remove_skill()
+    if not settings_changed:
+        print("書き換えました")
         return
     if path.exists():
         bak = path.with_name(f"{path.name}.baro-bak-{time.strftime('%Y%m%d-%H%M%S')}")
@@ -214,6 +229,9 @@ def doctor(args) -> None:
     md = Path.home() / ".claude" / "CLAUDE.md"
     check(md.exists() and "baro" in md.read_text("utf-8"), "CLAUDE.md に baro のルール",
           "CLAUDE.md に baro のルールがありません（baro rules --install）")
+    check(calib.skill_installed(), f"/{calib.SKILL_NAME} スキル（{calib.skill_path().parent}）",
+          f"/{calib.SKILL_NAME} スキルが入っていないか古くなっています（baro setup --apply か baro skill --install）")
+    print("    補正の設定: " + (f"{calib.path()}" if calib.path().exists() else "まだ作っていません（最初の表示で作ります）"))
     sid = os.environ.get("CLAUDE_CODE_SESSION_ID")
     print("    このシェルのセッション: " + (sid or "（Claude Code の外で実行）"))
     if not ok:

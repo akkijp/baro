@@ -30,7 +30,7 @@ Claude Desktop の Code タブでは、入力欄の上の帯に同じ 1 行を�
 
 ```
 📋 採用ページ 5 社の画像差し替え
-   ⏳ 残り約 26分（終了予定 15:12） ・ 🕒 18分 / 全体 44分 ・ 補正 ×1.20
+   ⏳ 残り約 26分（終了予定 15:12） ・ 🕒 18分 / 全体 44分
    ████▓░░░░░ 41% ・ 手順 3/7
 │                                     経過/見込み
 ├─ 1 調べる                            6/ 5分 █████
@@ -72,7 +72,7 @@ Claude Code を開いて、次の文をそのまま貼ってください。Claud
 baro（https://github.com/akkijp/baro）を入れて、Claude Code につないでください。
 1. `uv tool install git+https://github.com/akkijp/baro` を実行する。uv が無ければ `pipx install git+https://github.com/akkijp/baro`、どちらも無ければ `python3 -m pip install --user git+https://github.com/akkijp/baro`。
 2. `which baro` で入った場所を確認する。PATH に無ければ、入った場所をフルパスで使う。
-3. `baro setup --apply` を実行する（~/.claude/settings.json を書き換える。バックアップは自動で取られる）。
+3. `baro setup --apply` を実行する（~/.claude/settings.json を書き換え、見込みの補正を詰めるスキル /baro-calibration を ~/.claude/skills/ に入れる。settings.json のバックアップは自動で取られる）。
 4. `baro rules --install` を実行する（~/.claude/CLAUDE.md にルールを追記する）。
 5. `baro doctor` を実行して、すべて OK か確認する。NG があれば直す。
 6. Claude Desktop の Code タブでも使うなら、`git clone https://github.com/akkijp/baro ~/.local/share/baro-src` を実行し、~/.claude/settings.json の `env` に `"CLAUDE_CODE_PLUGIN_DIRS": "<ホームの絶対パス>/.local/share/baro-src/mod/baro-band"` を足す（既に値があれば、`:` で区切って後ろに足す）。
@@ -97,7 +97,7 @@ pipx install git+https://github.com/akkijp/baro
 
 ```sh
 baro setup            # 変更点を表示するだけ
-baro setup --apply    # ~/.claude/settings.json を書き換える（バックアップを取ります）
+baro setup --apply    # ~/.claude/settings.json を書き換え、/baro-calibration スキルを入れる（バックアップを取ります）
 baro rules --install  # ~/.claude/CLAUDE.md に Claude 向けのルールを追記する
 baro doctor           # 設定の確認
 ```
@@ -109,10 +109,22 @@ baro doctor           # 設定の確認
 - `statusLine` を `baro statusline` にする。すでに別の statusLine があれば、その command を `~/.claude/baro/config.json` に保存し、同じ入力を渡し続けます（既存の表示は baro の行に置き換わります）。
 - `Stop` フックに `baro hook stop` を追加する（Claude の応答が終わったら計測を止める）。
 - `UserPromptSubmit` フックに `baro hook prompt` を追加する（次の入力で計測を再開し、進行中の計画を Claude に知らせる）。
+- `~/.claude/skills/baro-calibration/` に `/baro-calibration` スキルを入れる（見込みの補正を詰めるときに使う。下の「見込みの補正」）。スキルだけを入れ直すなら `baro skill --install`。
 
 既存のフックはそのまま残ります。
 
 `baro rules --install` が追記するルールは `baro rules` で確認できます。CLAUDE.md を自分で管理しているなら、その文面を好きな場所に貼ってください。
+
+### 見込みの補正（テーマ別）
+
+Claude が付けた見込みは外れます。baro は終わった手順の実績を `~/.claude/baro/history.jsonl` に残し、残り時間を補正します。
+補正は手順の種類（テーマ: 調べる・作る・テスト・文書・git/PR・人の確認 など）ごとに行います。git や PR はすぐ終わり、人の確認は延びる、といった違いを反映するためです。画面に出るのは補正後の残り時間と終了予定時刻だけです。
+
+- 何もしなくても補正は効きます。最初に表示したとき、その PC の記録から `~/.claude/baro/calibration.json`（テーマ分け・重み・テーマごとの特徴データ）を作ります。
+- 計画を `baro end` で終えるたびに、`calibration.json` を作り直します（テーマ分けは保ち、特徴データと重みを記録に合わせ直します）。
+- `calibration.json` は PC ごとの記録から作るファイルです。リポジトリには入れません。消すと、次の表示で作り直されます。
+- `baro calibrate` で、テーマごとの見込みと実績、過去の記録で試した予測のずれを確かめられます。`--list` で手順ごとのテーマ分け、`--json` で中身そのもの、`--dry-run` で書き込まずに試せます。
+- テーマ分けを自分の仕事に合わせて詰めるときは、Claude Code で `/baro-calibration` と打つか「キャリブレーションして」と頼みます。キーワードを直した候補を過去の記録で比べ、当たるようになるときだけ採用します。
 
 ### Claude Desktop の Code タブで使う
 
@@ -147,15 +159,18 @@ git clone https://github.com/akkijp/baro ~/.local/share/baro-src
 - `baro` — 今のセッションの詳しい表示（Claude Code の外のシェルから。進行中が 1 つなら自動で選びます）
 - `baro ls` — 進行中の計画があるセッションの一覧
 - `baro stats` — 見込み時間の精度（実績 ÷ 見込みの倍率と、延びやすい手順）
+- `baro calibrate` — テーマごとの見込みと実績・補正の設定（`calibration.json`）を作り直す
+- `/baro-calibration`（Claude Code で）— テーマ分けをこの PC の仕事に合わせて詰める
 
 ### 残り時間の決め方
 
 - 見込みは Claude が手順ごとに付けた分数です。
 - 残り時間 = 作業中の手順の残り ＋ 未着手の手順の見込みの合計。
-- 実績 ÷ 見込みの倍率で補正します。倍率は 0.1〜3.0 倍の範囲に収めます。
+- 実績 ÷ 見込みの倍率で、手順ごとに補正します。倍率は 0.1〜3.0 倍の範囲に収めます。
   - 過去の手順の倍率（直近 50 手順）。記録が少ないうちは 1.0 倍に寄せます。
+  - 手順のテーマ（調べる・作る・テスト・文書・git/PR・人の確認 など）ごとの倍率。記録が少ないテーマは全体の倍率に寄せます。
   - 計画の途中では、その計画で終わった手順の倍率も混ぜます。見込みの癖は依頼ごとに違うので、同じ計画の実績がいちばん当たります。
-  - いまの倍率は `baro` の 2 行目（`補正 ×0.42` など）と `baro stats` で見られます。
+  - 倍率は画面に出しません。確かめるときは `baro calibrate --dry-run` か `baro stats`。
 - 回答待ち（🟦）と指示待ち（💤）の間は計測しません。
 
 ### Claude が呼ぶコマンド
@@ -191,6 +206,7 @@ baro end                               # 計画を終了
 | `sessions/<session_id>.json` | 進行中の計画 |
 | `archive/` | 終了した計画 |
 | `history.jsonl` | 完了した手順の見込みと実績（補正と `baro stats` に使う） |
+| `calibration.json` | テーマ分け・重み・テーマごとの特徴データ（無ければ最初の表示で作る。`baro end` のたびに作り直す） |
 | `config.json` | 元の statusLine の command |
 
 ## アンインストール
@@ -199,7 +215,7 @@ baro end                               # 計画を終了
 
 ```
 baro を外してください。
-1. `baro setup --undo --apply` を実行する（~/.claude/settings.json の statusLine とフックを元に戻す）。
+1. `baro setup --undo --apply` を実行する（~/.claude/settings.json の statusLine とフックを元に戻し、~/.claude/skills/ の /baro-calibration を消す）。
 2. `baro rules --remove` を実行する（~/.claude/CLAUDE.md から baro のルールを消す）。
 3. baro を入れたツールで消す: `uv tool uninstall baro`。uv で入れていなければ `pipx uninstall baro`、それも違えば `python3 -m pip uninstall baro`。
 4. ~/.claude/settings.json の `env` の `CLAUDE_CODE_PLUGIN_DIRS` に baro-band のパスがあれば、そのパスだけを外す（ほかのパスが無ければキーごと消す）。clone したフォルダ（`~/.local/share/baro-src`）があれば、消してよいか私に聞く。
@@ -210,7 +226,7 @@ baro を外してください。
 ### 方法 2: 手で外す
 
 ```sh
-baro setup --undo --apply   # settings.json の statusLine とフックを元に戻す
+baro setup --undo --apply   # settings.json の statusLine とフックを元に戻し、/baro-calibration スキルを消す
 baro rules --remove         # CLAUDE.md から baro のルールを消す（--install で足したものだけ）
 
 uv tool uninstall baro      # uv で入れた場合

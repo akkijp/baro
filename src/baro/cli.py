@@ -1,13 +1,14 @@
 """baro のコマンド。"""
 
 import argparse
+import json
 import os
 import pathlib
 import re
 import sys
 import time
 
-from . import clock, hooks, render, store
+from . import calib, clock, hooks, render, store
 from .clock import BLOCK, DOING, DONE, SKIP, TODO, WAIT
 
 MAX_DEPTH = 3
@@ -20,8 +21,8 @@ class BaroError(Exception):
 
 # --- 共通 ---------------------------------------------------------------------
 
-def _ratio() -> float:
-    return clock.ratio(store.read_history())
+def _ratio() -> clock.Ratios:
+    return calib.ratios()
 
 
 def _env_sid():
@@ -296,6 +297,15 @@ def cmd_end(args):
     print(render.detail(data, at, _ratio()))
     with store.locked(sid):
         store.archive(sid)
+    _recalibrate()
+
+
+def _recalibrate():
+    """計画を終えるたびに、この PC の履歴で calibration.json を作り直す（テーマ分けは今のまま）。"""
+    try:
+        calib.save(calib.calibrate(store.read_history()))
+    except Exception as e:  # 補正の作り直しに失敗しても end は止めない
+        _warn(f"calibration.json を作り直せませんでした: {e}")
 
 
 # --- 見る ---------------------------------------------------------------------
@@ -339,6 +349,57 @@ def cmd_stats(args):
         for h in worst:
             print(f"  🔺+{render.dur(h['actual'] - h['est'])}  {h['name']}"
                   f"（見込み {render.num(h['est'])}分 → {render.dur(h['actual'])}）")
+
+
+def _load_themes(file):
+    try:
+        raw = json.loads(pathlib.Path(file).read_text("utf-8"))
+    except (OSError, ValueError) as e:
+        raise BaroError(f"{file} を読めません: {e}")
+    themes = raw.get("themes") if isinstance(raw, dict) else raw
+    if not isinstance(themes, list) or not all(isinstance(t, dict) and t.get("key") for t in themes):
+        raise BaroError(f"{file} のテーマは [{{\"key\": …, \"label\": …, \"keywords\": […]}}, …] の形にしてください")
+    return themes
+
+
+def cmd_calibrate(args):
+    hist = store.read_history()
+    if args.themes:
+        themes = _load_themes(args.themes)
+    elif args.reset:
+        themes = calib.DEFAULT_THEMES
+    else:
+        themes = None
+    if args.list:
+        themes = themes or calib.settings()[0]
+        labels = {t["key"]: t.get("label", t["key"]) for t in themes}
+        for h in clock._usable(hist):
+            key = clock.classify(h.get("name", ""), themes)
+            print(f"{key}\t{labels.get(key, 'どれにも入らない')}\t{render.num(h['est'])}分\t"
+                  f"{h['actual']:.2f}分\t×{h['actual'] / h['est']:.2f}\t{h.get('title', '')}\t{h.get('name', '')}")
+        return
+    cal = calib.calibrate(hist, themes, do_tune=not args.no_tune)
+    if not args.dry_run:
+        calib.save(cal)
+    if args.json:
+        print(json.dumps(cal, ensure_ascii=False, indent=1))
+        return
+    print(render.calibration(cal, None if args.dry_run else calib.path()))
+
+
+# --- スキル（/baro-calibration） -----------------------------------------------
+
+def cmd_skill(args):
+    dst = calib.skill_path()
+    if args.remove:
+        print(f"{dst} を削除しました" if calib.remove_skill() else f"{dst} はありません")
+        return
+    if not args.install:
+        print(calib.skill_text(), end="")
+        return
+    action = "更新しました" if dst.exists() else "入れました"
+    calib.install_skill()
+    print(f"{dst} に{action}（Claude Code で /{calib.SKILL_NAME} として使えます）")
 
 
 # --- CLAUDE.md 用の文面 --------------------------------------------------------
@@ -445,6 +506,20 @@ def build_parser():
 
     a = sub.add_parser("stats", help="見込み時間の精度")
     a.set_defaults(fn=cmd_stats)
+
+    a = sub.add_parser("calibrate", help="履歴からテーマごとの特徴データを作り、補正の設定を決める")
+    a.add_argument("--json", action="store_true", help="calibration.json の中身をそのまま出す")
+    a.add_argument("--dry-run", action="store_true", help="calibration.json に書かない（試すだけ）")
+    a.add_argument("--themes", help="テーマ分けをこの JSON ファイルのものにする")
+    a.add_argument("--reset", action="store_true", help="テーマ分けを組み込みのものに戻す")
+    a.add_argument("--no-tune", action="store_true", help="重みを選び直さない")
+    a.add_argument("--list", action="store_true", help="記録の手順ごとに、どのテーマに入るかを出す（タブ区切り）")
+    a.set_defaults(fn=cmd_calibrate)
+
+    a = sub.add_parser("skill", help="キャリブレーションのスキル（/baro-calibration）を出す・入れる")
+    a.add_argument("--install", action="store_true", help="~/.claude/skills/baro-calibration/ に入れる（あれば更新）")
+    a.add_argument("--remove", action="store_true", help="入れたスキルを削除する")
+    a.set_defaults(fn=cmd_skill)
 
     a = sub.add_parser("statusline", help="（Claude Code の statusLine から呼ぶ）")
     a.add_argument("--no-chain", action="store_true", help="元の statusLine へ渡さない（mod の帯から呼ぶとき）")

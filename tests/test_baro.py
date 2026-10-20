@@ -12,7 +12,7 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from baro import cli, clock, hooks, render, store  # noqa: E402
+from baro import calib, cli, clock, hooks, render, store  # noqa: E402
 
 JST = timezone(timedelta(hours=9))
 T0 = datetime(2026, 10, 20, 14, 30, tzinfo=JST)
@@ -43,6 +43,7 @@ class Env(unittest.TestCase):
         self.addCleanup(self.tmp.cleanup)
         env = mock.patch.dict(os.environ, {"BARO_HOME": self.tmp.name,
                                            "BARO_SETTINGS": str(Path(self.tmp.name) / "settings.json"),
+                                           "BARO_SKILLS_DIR": str(Path(self.tmp.name) / "skills"),
                                            "CLAUDE_CODE_SESSION_ID": "sess-1"})
         env.start()
         self.addCleanup(env.stop)
@@ -124,6 +125,70 @@ class ClockTest(unittest.TestCase):
         self.assertAlmostEqual(clock.elapsed_min(data["items"][0], at(15)), 5)
 
 
+THEMES = [{"key": "test", "label": "テスト", "keywords": ["テスト", "確かめ"]},
+          {"key": "build", "label": "作る", "keywords": ["書く", "作る"]}]
+
+
+def rec(name, est, actual, plan="p"):
+    return {"sid": "s", "title": plan, "name": name, "est": est, "actual": actual}
+
+
+class ThemeTest(unittest.TestCase):
+    def leaf(self, name, est, spans=(), state=clock.TODO):
+        return {"id": "1", "name": name, "est_min": est, "state": state,
+                "spans": [[clock.iso(a), clock.iso(b) if b else None] for a, b in spans]}
+
+    def test_classify(self):
+        self.assertEqual(clock.classify("テストを通す", THEMES), "test")
+        self.assertEqual(clock.classify("設計書を書く", THEMES), "build")
+        self.assertEqual(clock.classify("書いたものを確かめる", THEMES), "test")  # 先に並ぶテーマが勝つ
+        self.assertEqual(clock.classify("公開する", THEMES), clock.OTHER)
+        self.assertEqual(calib.DEFAULT_THEMES[0]["key"], "human")
+        self.assertEqual(clock.classify("Desktop で確かめる（akki さん）", calib.DEFAULT_THEMES), "human")
+        self.assertEqual(clock.classify("main へマージして後片付け", calib.DEFAULT_THEMES), "ship")
+
+    def test_theme_ratios(self):
+        hist = [rec("テストを通す", 10, 30)] * 5 + [rec("画面を作る", 10, 2)] * 5
+        base = clock.ratio(hist)
+        tr = clock.theme_ratios(hist, THEMES, base)
+        self.assertAlmostEqual(tr["test"], (150 + base * 10) / (50 + 10))
+        self.assertAlmostEqual(tr["build"], (10 + base * 10) / (50 + 10))
+        r = calib.ratios(hist, {})
+        self.assertGreater(r.of(self.leaf("テストを足す", 10)), r.of(self.leaf("画面を作る", 10)))
+        # 記録の無いテーマは全体の倍率
+        self.assertAlmostEqual(calib.ratios(hist, {"themes": THEMES}).of(self.leaf("公開する", 10)), base)
+        # mode が global ならテーマで分けない
+        self.assertEqual(calib.ratios(hist, {"themes": THEMES, "mode": "global"}).by_theme, {})
+
+    def test_plan_ratio_matches_number_without_themes(self):
+        done = [self.leaf("a", 10, [(at(0), at(2))], clock.DONE), self.leaf("b", 10)]
+        r = clock.plan_ratio(done, at(2), clock.Ratios(base=1.2))
+        self.assertAlmostEqual(r.of(done[1]), clock.plan_ratio(done, at(2), 1.2))
+        self.assertAlmostEqual(clock.leaf_remaining(done[1], at(2), r), 10 * clock.plan_ratio(done, at(2), 1.2))
+
+    def test_backtest_and_calibrate(self):
+        # テストは見込みの 3 倍、作るは 0.2 倍かかる PC: テーマで分けたほうが当たる
+        hist = []
+        for i in range(15):
+            hist += [rec("テストを通す", 10, 30, f"p{i}"), rec("画面を作る", 10, 2, f"p{i}")]
+        none = calib.backtest(hist, THEMES, calib.DEFAULT_WEIGHTS, "none")
+        glob = calib.backtest(hist, THEMES, calib.DEFAULT_WEIGHTS, "global")
+        theme = calib.backtest(hist, THEMES, calib.DEFAULT_WEIGHTS, "theme")
+        self.assertEqual(none["n"], 30)
+        self.assertLess(theme["error"], glob["error"])
+        self.assertLess(theme["error"], none["error"])
+        cal = calib.calibrate(hist, THEMES, at=T0)
+        self.assertEqual(cal["mode"], "theme")
+        self.assertEqual(cal["features"]["themes"]["test"]["n"], 15)
+        self.assertAlmostEqual(cal["features"]["themes"]["test"]["ratio_median"], 3.0)
+        self.assertLessEqual(cal["backtest"]["theme"]["error"],
+                             calib.backtest(hist, THEMES, calib.DEFAULT_WEIGHTS, "theme")["error"])
+        self.assertIn("テスト", render.calibration(cal))
+        # 記録が少ないうちは重みを変えない
+        self.assertEqual(calib.calibrate(hist[:6], THEMES)["weights"], calib.DEFAULT_WEIGHTS)
+        self.assertEqual(calib.calibrate([], THEMES)["backtest"]["theme"]["n"], 0)
+
+
 class RenderTest(unittest.TestCase):
     def test_width(self):
         self.assertEqual(render.dw("🟩⬜"), 4)
@@ -162,9 +227,9 @@ class FlowTest(Env):
         self.run_cli("done", "2.1")  # start なしの done は前の区切りから数える
         self.run_cli("start", "2.2"); self.t = at(18)
         _, line, _ = self.run_cli("show", "--line")
-        # 経過 18 分・残り 3 + 13 + 10 = 26 分
+        # 経過 18 分・残り 3 + 13 + 10 = 26 分の見込みを、テーマごとの実績（見込みの約 1.03 倍）で補正
         self.assertEqual(line.strip(),
-                         "███▓░░░░░░ 3/7 ｜ 今: 2.2 設計書を書く（経過7分・残り約4分） ｜ 残り全体 約29分（15:17）")
+                         "███▓░░░░░░ 3/7 ｜ 今: 2.2 設計書を書く（経過7分・残り約4分） ｜ 残り全体 約28分（15:16）")
 
         _, detail, _ = self.run_cli("show")
         rows = [ln for ln in detail.splitlines() if "分" in ln and ("├─" in ln or "└─" in ln)]
@@ -178,7 +243,7 @@ class FlowTest(Env):
         self.t = at(40)
         _, line, _ = self.run_cli("show", "--line")
         self.assertIn("｜ 🙋 回答待ち: 公開してよいか ｜", line)
-        self.assertIn("再開後 残り約29分", line)
+        self.assertIn("再開後 残り約28分", line)
         # バックグラウンドの完了通知などの回では、回答待ちのまま
         self.run_hook(hooks.hook, mock.Mock(event="prompt"),
                       {"session_id": "sess-1", "prompt": "<task-notification>\n<task-id>x</task-id>"})
@@ -209,6 +274,9 @@ class FlowTest(Env):
         _, out, _ = self.run_cli("show")
         self.assertIn("✅ 完了", out)
         self.assertEqual(len(store.read_history()), 7)  # 3.1 は取りやめ
+        self.assertEqual(calib.load()["features"]["records"], 0)  # 無ければ最初の表示のときに作る
+        self.run_cli("end")
+        self.assertEqual(calib.load()["features"]["records"], 7)  # end のたびに作り直す
 
     def test_plan_guard_and_errors(self):
         self.run_cli("plan", "a", stdin="x 5\ny 5\nz 5\n")
@@ -249,6 +317,45 @@ class FlowTest(Env):
         self.assertIn("約15分", out.getvalue())
         self.assertLessEqual(render.dw(out.getvalue().strip()), 30)
 
+    def test_calibrate_cli(self):
+        for i in range(3):
+            store.append_history(rec("テストを通す", 10, 30, f"p{i}"))
+            store.append_history(rec("README を書く", 10, 2, f"p{i}"))
+        code, out, _ = self.run_cli("calibrate", "--dry-run")
+        self.assertEqual(code, 0)
+        self.assertIn("テスト・確かめ", out)
+        self.assertFalse(calib.path().exists())
+        calib.ratios()  # 無ければ最初に作る
+        self.assertEqual(calib.load()["features"]["records"], 6)
+        calib.save({"themes": THEMES})
+        self.assertEqual(calib.ratios().themes, THEMES)  # あれば作り直さない
+        themes = Path(self.tmp.name) / "themes.json"
+        themes.write_text(json.dumps({"themes": THEMES}, ensure_ascii=False), "utf-8")
+        _, out, _ = self.run_cli("calibrate", "--themes", str(themes), "--list")
+        self.assertTrue(out.startswith("test\tテスト\t10分"), out)
+        code, _, _ = self.run_cli("calibrate", "--themes", str(themes))
+        self.assertEqual(code, 0)
+        self.assertEqual(calib.load()["themes"], THEMES)
+        self.run_cli("calibrate")  # 書き込んだテーマ分けを保つ
+        self.assertEqual(calib.load()["themes"], THEMES)
+        self.run_cli("calibrate", "--reset")
+        self.assertEqual(calib.load()["themes"], calib.DEFAULT_THEMES)
+        themes.write_text("[1]", "utf-8")
+        code, _, err = self.run_cli("calibrate", "--themes", str(themes))
+        self.assertEqual(code, 1, err)
+
+    def test_skill_install(self):
+        _, out, _ = self.run_cli("skill")
+        self.assertIn("name: baro-calibration", out)
+        self.run_cli("skill", "--install")
+        dst = Path(self.tmp.name) / "skills" / "baro-calibration" / "SKILL.md"
+        self.assertEqual(dst.read_text("utf-8"), out)
+        self.assertTrue(calib.skill_installed())
+        dst.write_text("古い版", "utf-8")
+        self.assertFalse(calib.skill_installed())  # 古くなったら入れ直す対象
+        self.run_cli("skill", "--remove")
+        self.assertFalse(dst.parent.exists())
+
     def test_rules_install(self):
         home = Path(self.tmp.name) / "home"
         with mock.patch.object(Path, "home", return_value=home):
@@ -277,9 +384,11 @@ class FlowTest(Env):
             self.assertEqual(s["statusLine"]["command"], "/x/baro statusline")
             self.assertEqual(len(s["hooks"]["Stop"]), 2)
             self.assertEqual(store.load_config()["statusline_chain"], "orca-statusline")
+            self.assertTrue(calib.skill_installed())  # スキルも入れる
             _, out, _ = self.run_cli("setup", "--apply")
             self.assertIn("変更はありません", out)
             self.run_cli("setup", "--undo", "--apply")
+        self.assertFalse(calib.skill_path().exists())
         self.assertEqual(json.loads(path.read_text()), {**orig, "hooks": {**orig["hooks"], "UserPromptSubmit": []}})
 
 
