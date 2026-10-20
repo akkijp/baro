@@ -1,0 +1,16 @@
+[project]
+name = "baro"
+version = "0.1.0"
+description = "Claude Code の作業の残り時間と進み具合を出す"
+requires-python = ">=3.9"
+dependencies = []
+
+[project.scripts]
+baro = "baro.cli:main"
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
