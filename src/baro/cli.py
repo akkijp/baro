@@ -38,13 +38,17 @@ def _resolve(args, for_write: bool) -> str:
         return live[0][0]
     if not for_write and len(live) > 1:
         raise BaroError("計画のあるセッションが複数あります。baro ls で確かめ、--session で指定してください")
+    if not for_write:
+        raise BaroError("進行中の計画はありません（終了したものは baro ls --all）")
     raise BaroError("セッションが分かりません（CLAUDE_CODE_SESSION_ID が無い）。--session で指定してください")
 
 
-def _load_or_die(sid):
+def _load_or_die(sid, for_write=True):
     data = store.load(sid)
     if data is None:
-        raise BaroError("計画がありません。baro plan で作ってください")
+        if for_write:
+            raise BaroError("計画がありません。baro plan で作ってください")
+        raise BaroError("このセッションに進行中の計画はありません（他のセッションは baro ls）")
     return data
 
 
@@ -312,7 +316,7 @@ def _recalibrate():
 
 def cmd_show(args):
     sid = _resolve(args, for_write=False)
-    data = _load_or_die(sid)
+    data = _load_or_die(sid, for_write=False)
     at = clock.now()
     if args.line:
         print(render.line(data, at, _ratio(), width=args.width))
