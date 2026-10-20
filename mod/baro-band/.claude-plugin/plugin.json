@@ -1,0 +1,10 @@
+{
+  "name": "baro-band",
+  "version": "0.1.0",
+  "description": "baro の残り時間の 1 行を、入力欄の上の帯に出す（Desktop の Code タブ向け）",
+  "author": {
+    "name": "Kosuke Akizuki"
+  },
+  "license": "MIT",
+  "types": "./types/index.d.ts"
+}

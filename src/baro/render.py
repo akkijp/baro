@@ -1,6 +1,7 @@
 """1 行・詳しい表示・一覧を組み立てる。桁は表示幅で揃える。"""
 
 import math
+import re
 import unicodedata
 from datetime import datetime, timedelta
 
@@ -12,10 +13,13 @@ SYM = {DONE: "🟩", DOING: "🟨", TODO: "⬜", WAIT: "🟦", BLOCK: "🟥", SK
 
 # --- 幅 -----------------------------------------------------------------------
 
+_ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
+
+
 def dw(s: str) -> int:
-    """端末での表示幅（CJK・絵文字 = 2、罫線・ASCII = 1、結合文字 = 0）。"""
+    """端末での表示幅（CJK・絵文字 = 2、罫線・ASCII = 1、結合文字・色の指定 = 0）。"""
     w = 0
-    for ch in s:
+    for ch in _ANSI_RE.sub("", s):
         if unicodedata.combining(ch) or ch in "‍︎️":
             continue
         w += 2 if unicodedata.east_asian_width(ch) in ("W", "F") else 1
@@ -63,26 +67,37 @@ def num(x) -> str:
 
 # --- バー ---------------------------------------------------------------------
 
-def bar(pct: float, cells: int, marker: str = "", complete: bool = False) -> str:
+# バーのます: 済み █・今の手順 ▓・未着手 ░。色を付けるのはステータスラインだけ（端末の ANSI）
+CELL_DONE, CELL_MARK, CELL_TODO = "█", "▓", "░"
+ANSI = {DONE: "32", DOING: "33", WAIT: "34", BLOCK: "31", TODO: "90"}
+
+
+def _paint(text: str, state: str, color: bool) -> str:
+    return f"\x1b[{ANSI[state]}m{text}\x1b[0m" if color and text else text
+
+
+def bar(pct: float, cells: int, marker: str = "", complete: bool = False, color: bool = False) -> str:
+    """marker は今の手順の状態（DOING / WAIT / BLOCK）。空なら印を付けない。"""
     if complete:
-        return SYM[DONE] * cells
+        return _paint(CELL_DONE * cells, DONE, color)
     full = int(pct * cells + 1e-9)
     if marker:
         full = min(full, cells - 1)
-        return SYM[DONE] * full + marker + SYM[TODO] * (cells - full - 1)
+        return (_paint(CELL_DONE * full, DONE, color) + _paint(CELL_MARK, marker, color)
+                + _paint(CELL_TODO * (cells - full - 1), TODO, color))
     full = min(full, cells)
-    return SYM[DONE] * full + SYM[TODO] * (cells - full)
+    return _paint(CELL_DONE * full, DONE, color) + _paint(CELL_TODO * (cells - full), TODO, color)
 
 
 def _marker(states, paused) -> str:
     if paused and paused.get("kind") == "wait" and WAIT in states:
-        return SYM[WAIT]
+        return WAIT
     if DOING in states:
-        return SYM[DOING]
+        return DOING
     if WAIT in states:
-        return SYM[WAIT]
+        return WAIT
     if BLOCK in states:
-        return SYM[BLOCK]
+        return BLOCK
     return ""
 
 
@@ -97,52 +112,52 @@ def overall_marker(s: clock.Summary) -> str:
 
 # --- 1 行 ---------------------------------------------------------------------
 
-def _step_text(lf, at) -> str:
-    el = clock.elapsed_min(lf, at)
-    est = float(lf["est_min"])
-    over = "🔺" if el > est else ""
-    return f"{lf['id']} {lf['name']} {over}{int(round(el))}/{num(est)}分"
-
-
-def line(data, at: datetime, r: float, width=None) -> str:
+def line(data, at: datetime, r: float, width=None, color: bool = False) -> str:
+    r = clock.plan_ratio(data["items"], at, r)
     s = clock.summarize(data, at, r)
-    pct = f"{int(s.pct * 100)}%"
-    mk = overall_marker(s)
-    b = bar(s.pct, 10, mk, s.complete)
+    b = bar(s.pct, 10, overall_marker(s), s.complete, color)
+    count = f"{s.steps_done}/{s.steps_total}"
     rem = dur(s.remaining, up=True)
     paused = s.paused or {}
 
+    def variants(*parts_list):
+        return [" ｜ ".join(p for p in parts if p) for parts in parts_list]
+
     if s.complete:
         planned = data.get("planned_total_min") or clock.planned_total(data["items"])
-        return fit([f"✅ 完了 {dur(s.elapsed)}（見込み {dur(planned)}） {b}",
-                    f"✅ 完了 {dur(s.elapsed)}"], width)
+        done = f"✅ 完了 {dur(s.elapsed)}"
+        return fit(variants((f"{b} {count}", f"{done}（見込み {dur(planned)}）"),
+                            (f"{b} {count}", done), (done,)), width)
     if paused.get("kind") == "wait":
-        head = f"🙋 回答待ち: {paused.get('question', '')}"
-        return fit([f"{head} {b} {pct} ・ 再開後 残り約 {rem}",
-                    f"{head} {pct}",
-                    f"🙋 回答待ち {pct}"], width)
+        q = f"🙋 回答待ち: {paused.get('question', '')}"
+        return fit(variants((f"{b} {count}", q, f"再開後 残り約{rem}"),
+                            (f"{b} {count}", q), (f"{b} {count}", "🙋 回答待ち"), ("🙋 回答待ち",)), width)
     if paused.get("kind") == "stopped":
-        head = "💤 一時停止中（次の指示待ち）"
-        return fit([f"{head} {b} {pct} ・ 再開後 残り約 {rem}",
-                    f"{head} {pct}",
-                    f"💤 指示待ち {pct}"], width)
+        return fit(variants((f"{b} {count}", "💤 次の指示待ち", f"再開後 残り約{rem}"),
+                            (f"{b} {count}", "💤 次の指示待ち"), ("💤 指示待ち",)), width)
     if s.blocked and not s.current:
         lf = s.blocked[0]
         head = f"🟥 {lf['id']} {lf['name']}: {lf.get('note', '')}"
-        return fit([f"{head} {b} {pct}", head, f"🟥 停止中 {pct}"], width)
+        return fit(variants((f"{b} {count}", head), (head,), (f"🟥 停止中 {count}",)), width)
 
-    head = f"⏳ 残り約 {rem}（終了予定 {clock_at(at, s.finish)}）"
+    total = f"残り全体 約{rem}（{clock_at(at, s.finish)}）"
     if s.current:
-        step = _step_text(s.current[0], at)
+        lf = s.current[0]
+        el = clock.elapsed_min(lf, at)
+        est = float(lf["est_min"]) * r
+        name = f"今: {lf['id']} {lf['name']}"
+        if el > est:
+            step = f"{name}（経過{dur(el)}・見込み{dur(est, up=True)}を超過）"
+        else:
+            step = f"{name}（経過{dur(el)}・残り約{dur(est - el, up=True)}）"
     elif s.next_todo:
-        step = f"次: {s.next_todo['id']} {s.next_todo['name']}"
+        name = step = f"次: {s.next_todo['id']} {s.next_todo['name']}"
     else:
-        step = ""
-    tail = f" ・ {step}" if step else ""
-    return fit([f"{head} {b} {pct}{tail}",
-                f"{head} {b} {pct}",
-                f"{head} {mk or SYM[TODO]} {pct}",
-                f"⏳ 残り約 {rem} {mk or SYM[TODO]} {pct}"], width)
+        name = step = ""
+    return fit(variants((f"{b} {count}", step, total),
+                        (f"{b} {count}", name, total),
+                        (f"{b} {count}", total),
+                        (count, f"約{rem}（{clock_at(at, s.finish)}）")), width)
 
 
 # --- 詳しい表示 ---------------------------------------------------------------
@@ -209,6 +224,7 @@ def _event_text(ev) -> str:
 
 
 def detail(data, at: datetime, r: float) -> str:
+    r = clock.plan_ratio(data["items"], at, r)
     s = clock.summarize(data, at, r)
     planned = data.get("planned_total_min") or clock.planned_total(data["items"])
     out = [f"📋 {s.title}"]
@@ -237,7 +253,7 @@ def detail(data, at: datetime, r: float) -> str:
             head = f"   ⏳ 残り約 {rem}（終了予定 {clock_at(at, s.finish)}）"
         head += f" ・ 🕒 {dur(s.elapsed)} / 全体 {dur(s.total, up=True)}"
         if abs(r - 1.0) > 1e-9:
-            head += f" ・ 補正 ×{r:.1f}"
+            head += f" ・ 補正 ×{r:.2f}"
         out.append(head)
         b = bar(s.pct, 10, overall_marker(s))
         out.append(f"   {b} {int(s.pct * 100)}% ・ 手順 {s.steps_done}/{s.steps_total}")
