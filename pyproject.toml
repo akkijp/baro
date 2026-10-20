@@ -1,7 +1,7 @@
 [project]
 name = "baro"
 version = "0.1.0"
-description = "Claude Code の作業の残り時間と進捗を、絵文字のバーと終了予定時刻で出す"
+description = "Claude Code の作業の残り時間と終了予定時刻をステータスラインに出す"
 readme = "README.md"
 license = { text = "MIT" }
 authors = [{ name = "Kosuke Akizuki" }]

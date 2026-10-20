@@ -37,14 +37,14 @@ def _resolve(args, for_write: bool) -> str:
     if not for_write and len(live) == 1:
         return live[0][0]
     if not for_write and len(live) > 1:
-        raise BaroError("計画のあるセッションが複数あります。baro ls で確認し、--session で指定してください")
-    raise BaroError("セッションを特定できません（CLAUDE_CODE_SESSION_ID がありません）。--session で指定してください")
+        raise BaroError("計画のあるセッションが複数あります。baro ls で確かめ、--session で指定してください")
+    raise BaroError("セッションが分かりません（CLAUDE_CODE_SESSION_ID が無い）。--session で指定してください")
 
 
 def _load_or_die(sid):
     data = store.load(sid)
     if data is None:
-        raise BaroError("計画がありません。baro plan で作成してください")
+        raise BaroError("計画がありません。baro plan で作ってください")
     return data
 
 
@@ -99,13 +99,13 @@ def parse_outline(text: str):
             stack.pop()
         owner = stack[-1][2]
         if owner is not None and clock.is_leaf(owner):
-            raise BaroError(f"{no} 行目: 見込み時間のある行の下に手順は置けません")
+            raise BaroError(f"{no} 行目: 見込みのある行（手順）の下には行を置けません")
         body = raw.strip()
         m = _EST.match(body)
         if m and m.group(1).strip():
             node = {"name": m.group(1).strip(), "est_min": float(m.group(2)), "state": TODO, "spans": []}
             if node["est_min"] <= 0:
-                raise BaroError(f"{no} 行目: 見込み時間は 1 分以上にしてください")
+                raise BaroError(f"{no} 行目: 見込みは 1 分以上にしてください")
         else:
             node = {"name": body, "children": []}
         stack[-1][1].append(node)
@@ -114,7 +114,7 @@ def parse_outline(text: str):
     _number(root)
     _check_phases(root)
     if not list(clock.leaves(root)):
-        raise BaroError("手順がありません（行末に見込み時間を分で書いてください）")
+        raise BaroError("手順がありません（行末に見込みを分で書いてください）")
     return root
 
 
@@ -182,7 +182,7 @@ def cmd_start(args):
         clock.resume(data, at)
         others = _others_doing(data, args.id)
         if others:
-            _warn(f"{'・'.join(others)} が作業中のままです。終わっていれば baro done で完了にしてください")
+            _warn(f"{'・'.join(others)} が作業中のままです。終わっていれば baro done してください")
         lf["state"] = DOING
         lf.pop("note", None)
         clock.open_span(lf, at)
@@ -236,7 +236,7 @@ def cmd_add(args):
             if parent is None:
                 raise BaroError(f"段階 {args.where} はありません")
             if clock.is_leaf(parent):
-                raise BaroError(f"{args.where} は手順です。追加先には段階の番号か top を指定してください")
+                raise BaroError(f"{args.where} は手順です。追加先は段階の番号か top にしてください")
             siblings, prefix = parent["children"], parent["id"] + "."
         last = max((int(it["id"].rsplit(".", 1)[-1]) for it in siblings), default=0)
         node = {"id": f"{prefix}{last + 1}", "name": args.name, "est_min": float(args.minutes),
@@ -305,7 +305,7 @@ def _recalibrate():
     try:
         calib.save(calib.calibrate(store.read_history()))
     except Exception as e:  # 補正の作り直しに失敗しても end は止めない
-        _warn(f"calibration.json を作り直せませんでした: {e}")
+        _warn(f"calibration.json を作り直せません: {e}")
 
 
 # --- 見る ---------------------------------------------------------------------
@@ -337,11 +337,11 @@ def cmd_stats(args):
         return
     recent = rows[-clock.RATIO_WINDOW:]
     raw = sum(h["actual"] for h in recent) / sum(h["est"] for h in recent)
-    print(f"記録 {len(rows)} 手順（補正には直近 {len(recent)} 手順を使用）")
-    print(f"実績 ÷ 見込み = {raw:.2f} 倍 → 補正 ×{r:.2f}（記録が少ないうちは 1.0 に寄せる）")
-    print("  計画の途中では、その計画で終わった手順の実績も混ぜて補正します")
+    print(f"記録 {len(rows)} 手順（補正に使うのは直近 {len(recent)} 手順）")
+    print(f"実績 ÷ 見込み = {raw:.2f} 倍 → 全体の補正 ×{r:.2f}（記録が少ないうちは 1.0 に寄せる）")
     ok = sum(1 for h in recent if h["actual"] <= h["est"] + 0.5)
     print(f"見込みどおり {ok}/{len(recent)} 手順")
+    print("テーマごとの補正は baro calibrate で見る")
     worst = sorted(recent, key=lambda h: h["actual"] - h["est"], reverse=True)[:5]
     worst = [h for h in worst if h["actual"] - h["est"] >= 1]
     if worst:
@@ -392,14 +392,14 @@ def cmd_calibrate(args):
 def cmd_skill(args):
     dst = calib.skill_path()
     if args.remove:
-        print(f"{dst} を削除しました" if calib.remove_skill() else f"{dst} はありません")
+        print(f"{dst} を消しました" if calib.remove_skill() else f"{dst} はありません")
         return
     if not args.install:
         print(calib.skill_text(), end="")
         return
     action = "更新しました" if dst.exists() else "入れました"
     calib.install_skill()
-    print(f"{dst} に{action}（Claude Code で /{calib.SKILL_NAME} として使えます）")
+    print(f"{dst} に{action}（Claude Code で /{calib.SKILL_NAME} と打つと使えます）")
 
 
 # --- CLAUDE.md 用の文面 --------------------------------------------------------
@@ -407,10 +407,9 @@ def cmd_skill(args):
 RULES = """\
 ## 作業の残り時間を baro で出す
 
-3 手順以上になりそうな依頼では `baro` で「あと何分待てばよいか」を見せる。
-短い質問・1〜2 手順で終わる依頼では使わない。
+3 手順以上になりそうな依頼では `baro` で「あと何分待てばよいか」を見せる。短い質問・1〜2 手順で終わる依頼では使わない。
 
-- 最初に `baro plan "題名"` に手順の木を標準入力で渡す（インデント 2 文字で階層、行末に見込み時間の分。1 手順 2〜20 分）。
+- 最初に `baro plan "題名"` に手順の木を標準入力で渡す（インデント 2 文字で階層、行末に見込みの分。1 手順 2〜20 分）。
 - 手順を始めるとき `baro start <番号>`、終えたら `baro done <番号>`。回答を求めるときは `baro wait <番号> "質問"`。
 - 返信の先頭に `baro show --line` の 1 行。段階の区切り・回答待ち・完了では `baro show` をコードブロックで。
 - 見込みの 1.5 倍を超えたら `baro est <番号> <分> -r 理由`、手順が増えたら `baro add`（理由は必須）。中止は `baro skip`。
@@ -424,16 +423,16 @@ def cmd_rules(args):
     if args.remove:
         if RULES not in cur:
             print(f"{md} に baro rules --install で追記した文面はありません"
-                  + ("（baro の記述はありますが、手で直されています。手で消してください）" if "baro" in cur else ""))
+                  + ("（baro の記述はありますが、文面が変わっています。手で消してください）" if "baro" in cur else ""))
             return
         md.write_text(cur.replace(RULES, "").rstrip("\n") + "\n" if cur.replace(RULES, "").strip() else "", "utf-8")
-        print(f"{md} から削除しました")
+        print(f"{md} から消しました")
         return
     if not args.install:
         print(RULES, end="")
         return
     if "baro" in cur:
-        print(f"{md} にはすでに baro の記述があります（何もしていません）")
+        print(f"{md} にはすでに baro の記述があります。何もしていません")
         return
     md.parent.mkdir(parents=True, exist_ok=True)
     sep = "" if not cur or cur.endswith("\n\n") else ("\n" if cur.endswith("\n") else "\n\n")
@@ -445,10 +444,10 @@ def cmd_rules(args):
 
 def build_parser():
     p = argparse.ArgumentParser(prog="baro", description="Claude Code の作業の残り時間と進捗")
-    p.add_argument("--session", help="セッション ID（通常は CLAUDE_CODE_SESSION_ID から自動取得）")
+    p.add_argument("--session", help="セッション ID（省略時は CLAUDE_CODE_SESSION_ID）")
     sub = p.add_subparsers(dest="cmd")
 
-    a = sub.add_parser("plan", help="計画を作成する（手順は標準入力から）")
+    a = sub.add_parser("plan", help="計画を作る（手順は標準入力から）")
     a.add_argument("title")
     a.add_argument("--file")
     a.add_argument("--replace", action="store_true", help="進行中の計画を置き換える")
@@ -463,7 +462,7 @@ def build_parser():
     a.add_argument("-m", help="メモ")
     a.set_defaults(fn=cmd_done)
 
-    a = sub.add_parser("est", help="見込み時間を変更する")
+    a = sub.add_parser("est", help="見込みを変更する")
     a.add_argument("id")
     a.add_argument("minutes", type=float)
     a.add_argument("-r", "--reason", required=True)
@@ -477,7 +476,7 @@ def build_parser():
     a.add_argument("-r", "--reason", required=True)
     a.set_defaults(fn=cmd_add)
 
-    a = sub.add_parser("wait", help="回答待ちにする（時間の計測を止める）")
+    a = sub.add_parser("wait", help="回答待ちにする（計測を止める）")
     a.add_argument("id")
     a.add_argument("question")
     a.set_defaults(fn=cmd_wait)
@@ -495,34 +494,34 @@ def build_parser():
     a = sub.add_parser("end", help="計画を終了する")
     a.set_defaults(fn=cmd_end)
 
-    a = sub.add_parser("show", help="表示する")
-    a.add_argument("--line", action="store_true", help="1 行で")
+    a = sub.add_parser("show", help="詳しい表示")
+    a.add_argument("--line", action="store_true", help="1 行で出す")
     a.add_argument("--width", type=int)
     a.set_defaults(fn=cmd_show)
 
-    a = sub.add_parser("ls", help="計画のあるセッションの一覧")
-    a.add_argument("--all", action="store_true", help="終了したもの・古いものも含める")
+    a = sub.add_parser("ls", help="進行中の計画があるセッションの一覧")
+    a.add_argument("--all", action="store_true", help="終了したもの・古いものも出す")
     a.set_defaults(fn=cmd_ls)
 
-    a = sub.add_parser("stats", help="見込み時間の精度")
+    a = sub.add_parser("stats", help="見込みの当たり具合")
     a.set_defaults(fn=cmd_stats)
 
-    a = sub.add_parser("calibrate", help="履歴からテーマごとの特徴データを作り、補正の設定を決める")
+    a = sub.add_parser("calibrate", help="記録からテーマごとの補正を作り直す（calibration.json）")
     a.add_argument("--json", action="store_true", help="calibration.json の中身をそのまま出す")
-    a.add_argument("--dry-run", action="store_true", help="calibration.json に書かない（試すだけ）")
-    a.add_argument("--themes", help="テーマ分けをこの JSON ファイルのものにする")
+    a.add_argument("--dry-run", action="store_true", help="書き込まずに試す")
+    a.add_argument("--themes", help="テーマ分けをこの JSON ファイルに替える")
     a.add_argument("--reset", action="store_true", help="テーマ分けを組み込みのものに戻す")
     a.add_argument("--no-tune", action="store_true", help="重みを選び直さない")
-    a.add_argument("--list", action="store_true", help="記録の手順ごとに、どのテーマに入るかを出す（タブ区切り）")
+    a.add_argument("--list", action="store_true", help="記録の手順ごとにテーマを出す（タブ区切り）")
     a.set_defaults(fn=cmd_calibrate)
 
-    a = sub.add_parser("skill", help="キャリブレーションのスキル（/baro-calibration）を出す・入れる")
+    a = sub.add_parser("skill", help="/baro-calibration スキルの文面を出す・入れる")
     a.add_argument("--install", action="store_true", help="~/.claude/skills/baro-calibration/ に入れる（あれば更新）")
-    a.add_argument("--remove", action="store_true", help="入れたスキルを削除する")
+    a.add_argument("--remove", action="store_true", help="入れたスキルを消す")
     a.set_defaults(fn=cmd_skill)
 
     a = sub.add_parser("statusline", help="（Claude Code の statusLine から呼ぶ）")
-    a.add_argument("--no-chain", action="store_true", help="元の statusLine へ渡さない（mod の帯から呼ぶとき）")
+    a.add_argument("--no-chain", action="store_true", help="元の statusLine に入力を渡さない（mod の帯から呼ぶとき）")
     a.add_argument("--width", type=int, help="表示幅（省略時は端末の幅）")
     a.set_defaults(fn=hooks.statusline)
 
@@ -531,13 +530,13 @@ def build_parser():
     a.set_defaults(fn=hooks.hook)
 
     a = sub.add_parser("setup", help="Claude Code の設定に baro を組み込む")
-    a.add_argument("--apply", action="store_true", help="実際に書き換える（指定しない場合は変更点の表示のみ）")
+    a.add_argument("--apply", action="store_true", help="書き換える（無ければ変更点を表示するだけ）")
     a.add_argument("--undo", action="store_true", help="組み込んだ設定を外す")
     a.set_defaults(fn=hooks.setup)
 
     a = sub.add_parser("rules", help="CLAUDE.md に書くルールの文面を出す")
     a.add_argument("--install", action="store_true", help="~/.claude/CLAUDE.md に追記する（すでにあれば何もしない）")
-    a.add_argument("--remove", action="store_true", help="--install で追記した文面を ~/.claude/CLAUDE.md から削除する")
+    a.add_argument("--remove", action="store_true", help="--install で追記した文面を ~/.claude/CLAUDE.md から消す")
     a.set_defaults(fn=cmd_rules)
 
     a = sub.add_parser("doctor", help="設定の確認")
