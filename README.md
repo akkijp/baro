@@ -1,5 +1,7 @@
 # baro
 
+![baro — Claude Code の作業の残り時間・終了予定時刻・進み具合を表示するツール](docs/assets/baro-hero.png)
+
 Claude Code に仕事を頼んだとき、**「あと何分待てばよいか」** を画面の下に出す道具です。
 
 ```
