@@ -310,6 +310,9 @@ baro/
 - mod は `baro statusline --no-chain --width <帯の幅>` を `$.process.run` で呼び、stdin に `{"session_id": …}` を渡す。
   計画と計測は baro のまま（mod は表示だけ）。`--no-chain` は元の statusLine（Orca）へ渡さないため。
 - 出力の ANSI の色は、帯では Text の色に置き換える（32 → success・33 → warning・34 → suggestion・31 → error・90 → dimColor）。
+- 1 行目の末尾に「詳細」ボタンを置き、押すとペイン（`ui.open`・id `baro-detail`）に `baro --session <id> show` の木を出す（2026-10-20 改訂 4）。
+- 2 行目に使用量を出す: `$.session.usage()` の rateLimits（five_hour・seven_day）・context.percent・cost.usd と、`$.agent.list()` の実行中のサブエージェント数。
+  80% 以上で warning・95% 以上で error の色。使用量の行はターミナルでも描く（計画の行だけステータスラインと重なるので描かない）。
 - 描き直し: `tool.call`（baro start / done は Bash から呼ばれる）・`prompt.submit`・`turn.complete` のあとと、30 秒ごと。帯の幅が変わったときも。
 - 読み込ませ方: `~/.claude/settings.json` の `env` の `CLAUDE_CODE_PLUGIN_DIRS` に `mod/baro-band` の絶対パスを書く。
   Desktop が起動するセッションも、ターミナルのセッションもこれを読む。uv / pipx で入れた baro には mod が含まれないので、clone が要る。
