@@ -2,6 +2,7 @@
 
 import argparse
 import os
+import pathlib
 import re
 import sys
 import time
@@ -341,6 +342,37 @@ def cmd_stats(args):
                   f"（見込み {render.num(h['est'])}分 → {render.dur(h['actual'])}）")
 
 
+# --- CLAUDE.md 用の文面 --------------------------------------------------------
+
+RULES = """\
+## 作業の残り時間を baro で出す
+
+3 手順以上になりそうな依頼では `baro` で「あと何分待てばよいか」を見せる。
+短い質問・1〜2 手順で終わる依頼では使わない。
+
+- 最初に `baro plan "題名"` に手順の木を標準入力で渡す（インデント 2 文字で階層、行末に見込み時間の分。1 手順 2〜20 分）。
+- 手順を始めるとき `baro start <番号>`、終えたら `baro done <番号>`。回答を求めるときは `baro wait <番号> "質問"`。
+- 返信の先頭に `baro show --line` の 1 行。段階の区切り・回答待ち・完了では `baro show` をコードブロックで。
+- 見込みの 1.5 倍を超えたら `baro est <番号> <分> -r 理由`、手順が増えたら `baro add`（理由は必須）。中止は `baro skip`。
+- 終わったら `baro end`。サブエージェント・fork からは呼ばない（親のセッションの計画を書き換えてしまう）。
+"""
+
+
+def cmd_rules(args):
+    if not args.install:
+        print(RULES, end="")
+        return
+    md = pathlib.Path.home() / ".claude" / "CLAUDE.md"
+    cur = md.read_text("utf-8") if md.exists() else ""
+    if "baro" in cur:
+        print(f"{md} にはすでに baro の記述があります（何もしていません）")
+        return
+    md.parent.mkdir(parents=True, exist_ok=True)
+    sep = "" if not cur or cur.endswith("\n\n") else ("\n" if cur.endswith("\n") else "\n\n")
+    md.write_text(cur + sep + RULES, "utf-8")
+    print(f"{md} に追記しました")
+
+
 # --- 入口 ---------------------------------------------------------------------
 
 def build_parser():
@@ -418,6 +450,10 @@ def build_parser():
     a.add_argument("--apply", action="store_true", help="実際に書き換える（指定しない場合は変更点の表示のみ）")
     a.add_argument("--undo", action="store_true", help="組み込んだ設定を外す")
     a.set_defaults(fn=hooks.setup)
+
+    a = sub.add_parser("rules", help="CLAUDE.md に書くルールの文面を出す")
+    a.add_argument("--install", action="store_true", help="~/.claude/CLAUDE.md に追記する（すでにあれば何もしない）")
+    a.set_defaults(fn=cmd_rules)
 
     a = sub.add_parser("doctor", help="設定の確認")
     a.set_defaults(fn=hooks.doctor)

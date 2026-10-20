@@ -1,9 +1,24 @@
 [project]
 name = "baro"
 version = "0.1.0"
-description = "Claude Code の作業の残り時間と進捗を出す"
+description = "Claude Code の作業の残り時間と進捗を、絵文字のバーと終了予定時刻で出す"
+readme = "README.md"
+license = { text = "MIT" }
+authors = [{ name = "Kosuke Akizuki" }]
 requires-python = ">=3.9"
 dependencies = []
+keywords = ["claude-code", "statusline", "progress"]
+classifiers = [
+  "Environment :: Console",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: MacOS",
+  "Operating System :: POSIX :: Linux",
+  "Programming Language :: Python :: 3",
+]
+
+[project.urls]
+Homepage = "https://github.com/akkijp/baro"
+Issues = "https://github.com/akkijp/baro/issues"
 
 [project.scripts]
 baro = "baro.cli:main"

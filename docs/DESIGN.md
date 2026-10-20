@@ -207,7 +207,7 @@ baro/
 └─ tests/                  # clock と render を中心に
 ```
 
-- 入れ方: `uv tool install -e ~/Documents/GitHub/akkijp/baro` で `~/.local/bin/baro` に置く（手元の変更がすぐ効く）。
+- 入れ方: `uv tool install git+https://github.com/akkijp/baro`（開発中は clone して `uv tool install -e .`）で `~/.local/bin/baro` に置く。
 
 ### 8.3 セッションの見分け方
 
@@ -252,7 +252,7 @@ baro/
 {
   "session_id": "…",
   "title": "採用ページ 5 社の画像差し替え",
-  "cwd": "/Users/akki/Documents/GitHub/akkijp/dotsvm",
+  "cwd": "/home/you/projects/site",
   "created": "2026-10-20T14:30:00+09:00",
   "planned_total_min": 43,
   "paused": null,

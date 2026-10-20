@@ -202,7 +202,7 @@ def doctor(args) -> None:
     print("    元の statusLine: " + ("保存あり（同じ入力を渡しています）" if chain else "なし"))
     md = Path.home() / ".claude" / "CLAUDE.md"
     check(md.exists() and "baro" in md.read_text("utf-8"), "CLAUDE.md に baro のルール",
-          "CLAUDE.md に baro のルールがありません")
+          "CLAUDE.md に baro のルールがありません（baro rules --install）")
     sid = os.environ.get("CLAUDE_CODE_SESSION_ID")
     print("    このシェルのセッション: " + (sid or "（Claude Code の外で実行）"))
     if not ok:

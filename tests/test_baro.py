@@ -220,6 +220,18 @@ class FlowTest(Env):
         self.assertTrue(out.getvalue().startswith("⏳ 残り約 15分"), out.getvalue())
         self.assertLessEqual(render.dw(out.getvalue().strip()), 26)
 
+    def test_rules_install(self):
+        home = Path(self.tmp.name) / "home"
+        with mock.patch.object(Path, "home", return_value=home):
+            _, out, _ = self.run_cli("rules")
+            self.assertTrue(out.startswith("## 作業の残り時間を baro で出す"))
+            self.run_cli("rules", "--install")
+            md = home / ".claude" / "CLAUDE.md"
+            self.assertEqual(md.read_text(), cli.RULES)
+            _, out, _ = self.run_cli("rules", "--install")
+            self.assertIn("すでに", out)
+            self.assertEqual(md.read_text(), cli.RULES)
+
     def test_setup_and_undo(self):
         path = Path(os.environ["BARO_SETTINGS"])
         orig = {"statusLine": {"type": "command", "command": "orca-statusline"},
