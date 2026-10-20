@@ -54,7 +54,8 @@ def _chain(raw: bytes) -> None:
 
 def statusline(args) -> None:
     raw = sys.stdin.buffer.read()
-    _chain(raw)
+    if not getattr(args, "no_chain", False):
+        _chain(raw)
     try:
         sid = _read_payload(raw).get("session_id")
         if not sid:
@@ -68,13 +69,21 @@ def statusline(args) -> None:
             updated = clock.parse(data.get("updated") or data["created"])
             if (at - updated).total_seconds() > HIDE_DONE_AFTER_SEC:
                 return
-        width = _tty_width()
-        print(render.line(data, at, r, width=(width - 4) if width else None))
+        width = getattr(args, "width", None)
+        if width is None:
+            tty = _tty_width()
+            width = (tty - 4) if tty else None
+        print(render.line(data, at, r, width=width, color=True))
     except Exception:  # ステータスラインは何があっても落とさない
         return
 
 
 # --- フック -------------------------------------------------------------------
+
+def _is_notification(payload: dict) -> bool:
+    """人の入力ではなく、Claude Code が差し込んだ通知の回か（バックグラウンドの完了・mod の読み込みなど）。"""
+    return str(payload.get("prompt") or "").lstrip().startswith("<task-notification>")
+
 
 def hook(args) -> None:
     payload = _read_payload(sys.stdin.buffer.read())
@@ -96,6 +105,8 @@ def hook(args) -> None:
         if args.event == "stop":
             if not data.get("paused"):
                 clock.pause(data, at, "stopped")
+        elif _is_notification(payload) and (data.get("paused") or {}).get("kind") == "wait":
+            pass  # 回答待ちは人の返事でだけ解く（バックグラウンドの完了通知などでは解かない）
         else:
             clock.resume(data, at)
         data["updated"] = clock.iso(at)

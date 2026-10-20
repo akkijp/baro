@@ -5,46 +5,49 @@
 Claude Code に仕事を頼んだとき、**「あと何分待てばよいか」** を画面の下に出す道具です。
 
 ```
-⏳ 残り約 26分（終了予定 15:12） 🟩🟩🟩🟩🟨⬜⬜⬜⬜⬜ 41% ・ 2.2 設計書を書く 7/10分
+████▓░░░░░ 3/7 ｜ 今: 2.2 設計書を書く（経過7分・残り約4分） ｜ 残り全体 約26分（15:12）
 ```
 
 Claude が作業の最初に「段階 › 手順」の木と手順ごとの見込み時間を宣言し、手順を終えるたびに進めます。
 baro はそれを集計して、残り時間・終了予定時刻・進捗のバーを、Claude Code のステータスラインと返信に出します。
+Claude Desktop の Code タブでは、入力欄の上の帯に同じ 1 行を出します。
 
-*baro shows "how many minutes until Claude Code is done" in the status line. Japanese UI only for now.*
+*baro shows "how many minutes until Claude Code is done" in the status line (or above the prompt in the Claude Desktop Code tab). Japanese UI only for now.*
 
 ## 画面
 
-ステータスライン（常に 1 行）:
+ステータスライン（常に 1 行。Desktop の Code タブでは入力欄の上の帯）:
 
 | 状態 | 表示 |
 |---|---|
-| 作業中 | `⏳ 残り約 26分（終了予定 15:12） 🟩🟩🟩🟩🟨⬜⬜⬜⬜⬜ 41% ・ 2.2 設計書を書く 7/10分` |
-| 見込み超過 | `⏳ 残り約 25分（終了予定 15:14） 🟩🟩🟩🟩🟨⬜⬜⬜⬜⬜ 45% ・ 2.2 設計書を書く 🔺13/10分` |
-| 回答待ち | `🙋 回答待ち: 公開してよいですか？ 🟩🟩🟩🟩🟦⬜⬜⬜⬜⬜ 41% ・ 再開後 残り約 26分` |
-| 指示待ち | `💤 一時停止中（次の指示待ち） 🟩🟩🟩🟩🟨⬜⬜⬜⬜⬜ 41% ・ 再開後 残り約 26分` |
-| 完了 | `✅ 完了 47分（見込み 43分） 🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩` |
+| 作業中 | `████▓░░░░░ 3/7 ｜ 今: 2.2 設計書を書く（経過7分・残り約4分） ｜ 残り全体 約26分（15:12）` |
+| 見込み超過 | `████▓░░░░░ 3/7 ｜ 今: 2.2 設計書を書く（経過13分・見込み10分を超過） ｜ 残り全体 約25分（15:14）` |
+| 回答待ち | `████▓░░░░░ 3/7 ｜ 🙋 回答待ち: 公開してよいですか？ ｜ 再開後 残り約26分` |
+| 指示待ち | `████▓░░░░░ 3/7 ｜ 💤 次の指示待ち ｜ 再開後 残り約26分` |
+| 完了 | `██████████ 7/7 ｜ ✅ 完了 47分（見込み 43分）` |
 
 `baro` と打つと詳しい表示:
 
 ```
 📋 採用ページ 5 社の画像差し替え
-   ⏳ 残り約 26分（終了予定 15:12） ・ 🕒 18分 / 全体 44分 ・ 補正 ×1.2
-   🟩🟩🟩🟩🟨⬜⬜⬜⬜⬜ 41% ・ 手順 3/7
+   ⏳ 残り約 26分（終了予定 15:12） ・ 🕒 18分 / 全体 44分 ・ 補正 ×1.20
+   ████▓░░░░░ 41% ・ 手順 3/7
 │                                     経過/見込み
-├─ 1 調べる                            6/ 5分 🟩🟩🟩🟩🟩
+├─ 1 調べる                            6/ 5分 █████
 │   ├─ 🟩 1.1 公開中のページを確認     2/ 2分
 │   └─ 🟩 1.2 画像の候補を集める       4/ 3分 🔺+1分
-├─ 2 作る                             12/28分 🟩🟩🟨⬜⬜
+├─ 2 作る                             12/28分 ██▓░░
 │   ├─ 🟩 2.1 差し替える画像を決める   5/ 5分
 │   ├─ 🟨 2.2 設計書を書く             7/10分 ◀ 作業中
 │   └─ ⬜ 2.3 組み立てる               -/13分
-└─ 3 仕上げ                            -/10分 ⬜⬜⬜⬜⬜
+└─ 3 仕上げ                            -/10分 ░░░░░
     ├─ ⬜ 3.1 スマホ幅で確かめる       -/ 5分
     └─ ⬜ 3.2 公開する                 -/ 5分
 ```
 
-| マス | 意味 |
+バーは █ が済み、▓ が今の手順、░ が未着手です。ステータスラインでは █ を緑、▓ を状態の色（作業中は黄・回答待ちは青・停止中は赤）で出します。手順の行の印は次のとおりです。
+
+| 印 | 意味 |
 |---|---|
 | 🟩 | 完了 |
 | 🟨 | 作業中 |
@@ -55,7 +58,7 @@ baro はそれを集計して、残り時間・終了予定時刻・進捗のバ
 
 ## 必要なもの
 
-- Claude Code（CLI）
+- Claude Code（CLI）、または Claude Desktop の Code タブ
 - Python 3.9 以上（外部ライブラリは使いません）
 - macOS / Linux
 
@@ -72,7 +75,8 @@ baro（https://github.com/akkijp/baro）を入れて、Claude Code につない�
 3. `baro setup --apply` を実行する（~/.claude/settings.json を書き換える。バックアップは自動で取られる）。
 4. `baro rules --install` を実行する（~/.claude/CLAUDE.md にルールを追記する）。
 5. `baro doctor` を実行して、すべて OK か確認する。NG があれば直す。
-6. 最後に、設定を反映するには Claude Code を起動し直す必要があることを伝える。
+6. Claude Desktop の Code タブでも使うなら、`git clone https://github.com/akkijp/baro ~/.local/share/baro-src` を実行し、~/.claude/settings.json の `env` に `"CLAUDE_CODE_PLUGIN_DIRS": "<ホームの絶対パス>/.local/share/baro-src/mod/baro-band"` を足す（既に値があれば、`:` で区切って後ろに足す）。
+7. 最後に、設定を反映するには Claude Code（Desktop で使うなら Claude Desktop）を起動し直す必要があることを伝える。
 ```
 
 終わったら Claude Code を起動し直してください。次に 3 手順以上の依頼をすると、画面の下に残り時間が出ます。
@@ -110,6 +114,32 @@ baro doctor           # 設定の確認
 
 `baro rules --install` が追記するルールは `baro rules` で確認できます。CLAUDE.md を自分で管理しているなら、その文面を好きな場所に貼ってください。
 
+### Claude Desktop の Code タブで使う
+
+Desktop の Code タブにはステータスラインが出ません。代わりに、同じ 1 行を入力欄の上の帯に出す mod（`mod/baro-band/`。Claude Code に足すプラグイン）を使います。
+mod は uv / pipx で入れた baro には含まれないので、リポジトリを clone して、そのフォルダを `~/.claude/settings.json` の `env` に書きます。
+
+```sh
+git clone https://github.com/akkijp/baro ~/.local/share/baro-src
+```
+
+```json
+{
+  "env": {
+    "CLAUDE_CODE_PLUGIN_DIRS": "/Users/you/.local/share/baro-src/mod/baro-band"
+  }
+}
+```
+
+パスは `~` を使わず絶対パスで書いてください（`/Users/you` は自分のホームに置き換えます）。設定したら Claude Desktop を起動し直します。
+`env` に `CLAUDE_CODE_PLUGIN_DIRS` が既にあれば、`:` で区切って後ろに足してください。
+
+- mod は `baro statusline --no-chain` を呼んで、その 1 行を描くだけです。計画と計測は baro のままです。
+- ターミナルでも mod は読み込まれますが、ステータスラインと重なるので帯は出しません。
+- `baro` が `~/.local/bin` か PATH の上に無いと、帯は出ません。
+- 帯は、ツールの実行が終わったとき・依頼を送ったとき・応答が終わったときと、30 秒ごとに描き直します。
+- 更新するときは、clone したフォルダで `git pull` してから Desktop を起動し直します。
+
 ## 使い方
 
 ふだんは何もしません。3 手順以上になりそうな依頼をすると、Claude が計画を立てて画面の下に残り時間が出ます。
@@ -122,7 +152,10 @@ baro doctor           # 設定の確認
 
 - 見込みは Claude が手順ごとに付けた分数です。
 - 残り時間 = 作業中の手順の残り ＋ 未着手の手順の見込みの合計。
-- 過去の実績（実績 ÷ 見込み）で補正します。10 手順分たまってから効き、0.7〜2.0 倍の範囲に収めます。
+- 実績 ÷ 見込みの倍率で補正します。倍率は 0.1〜3.0 倍の範囲に収めます。
+  - 過去の手順の倍率（直近 50 手順）。記録が少ないうちは 1.0 倍に寄せます。
+  - 計画の途中では、その計画で終わった手順の倍率も混ぜます。見込みの癖は依頼ごとに違うので、同じ計画の実績がいちばん当たります。
+  - いまの倍率は `baro` の 2 行目（`補正 ×0.42` など）と `baro stats` で見られます。
 - 回答待ち（🟦）と指示待ち（💤）の間は計測しません。
 
 ### Claude が呼ぶコマンド
@@ -169,8 +202,9 @@ baro を外してください。
 1. `baro setup --undo --apply` を実行する（~/.claude/settings.json の statusLine とフックを元に戻す）。
 2. `baro rules --remove` を実行する（~/.claude/CLAUDE.md から baro のルールを消す）。
 3. baro を入れたツールで消す: `uv tool uninstall baro`。uv で入れていなければ `pipx uninstall baro`、それも違えば `python3 -m pip uninstall baro`。
-4. `~/.claude/baro/` に計画の記録が残っている。消してよいか私に聞いてから、消す場合は `trash` か `rm -r` で消す。
-5. 最後に、Claude Code を起動し直すと設定が反映されることを伝える。
+4. ~/.claude/settings.json の `env` の `CLAUDE_CODE_PLUGIN_DIRS` に baro-band のパスがあれば、そのパスだけを外す（ほかのパスが無ければキーごと消す）。clone したフォルダ（`~/.local/share/baro-src`）があれば、消してよいか私に聞く。
+5. `~/.claude/baro/` に計画の記録が残っている。消してよいか私に聞いてから、消す場合は `trash` か `rm -r` で消す。
+6. 最後に、Claude Code（Desktop で使っていたなら Claude Desktop）を起動し直すと設定が反映されることを伝える。
 ```
 
 ### 方法 2: 手で外す
@@ -186,6 +220,8 @@ python3 -m pip uninstall baro   # pip で入れた場合
 rm -r ~/.claude/baro        # 計画の記録・実績。残しておいても害はありません
 ```
 
+Desktop 用の mod を入れた場合は、`~/.claude/settings.json` の `env` から `CLAUDE_CODE_PLUGIN_DIRS`（baro-band のパス）を消し、clone したフォルダ（`~/.local/share/baro-src`）も消してください。
+
 `baro setup --undo --apply` は、`baro setup --apply` が保存しておいた元の statusLine の command を書き戻し、追加した `Stop` / `UserPromptSubmit` のフックだけを外します。他のフックには触りません。
 settings.json のバックアップ（`~/.claude/settings.json.baro-bak-<日時>`）も残っているので、万一のときはそれを戻してください。
 
@@ -196,7 +232,11 @@ git clone https://github.com/akkijp/baro
 cd baro
 uv tool install -e .                   # 手元の変更がそのまま効く
 python3 -m unittest discover -s tests
+claude plugin validate mod/baro-band   # Desktop 用の mod の検査
+claude plugin test mod/baro-band       # mod のテスト
 ```
+
+mod を手元で試すときは、`CLAUDE_CODE_PLUGIN_DIRS` に clone したフォルダの `mod/baro-band` を書くか、`claude --plugin-dir mod/baro-band` で起動します。
 
 設計の詳細は [docs/DESIGN.md](docs/DESIGN.md)。
 

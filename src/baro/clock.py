@@ -7,8 +7,10 @@ from typing import List, Optional
 DONE, DOING, TODO, WAIT, BLOCK, SKIP = "done", "doing", "todo", "wait", "block", "skip"
 ACTIVE = (DOING, WAIT, BLOCK)
 
-RATIO_MIN, RATIO_MAX = 0.7, 2.0
-RATIO_WINDOW, RATIO_MIN_SAMPLES = 50, 10
+RATIO_MIN, RATIO_MAX = 0.1, 3.0
+RATIO_WINDOW = 50
+# 補正の重み（見込みの分）。記録が少ないうちは、履歴の補正は 1.0 に、計画の中の補正は履歴の補正に寄せる。
+HIST_PRIOR_MIN, PLAN_PRIOR_MIN = 20.0, 10.0
 
 
 def now() -> datetime:
@@ -86,14 +88,29 @@ def close_span(leaf, at: datetime) -> None:
         leaf["spans"][-1][1] = iso(at)
 
 
+def _shrink(actual: float, est: float, prior: float, weight: float) -> float:
+    """実績÷見込みを、見込み weight 分ぶんの prior と混ぜる（記録が少ないほど prior に近い）。"""
+    r = (actual + prior * weight) / (est + weight)
+    return min(max(r, RATIO_MIN), RATIO_MAX)
+
+
 def ratio(history) -> float:
-    """過去の手順の 実績÷見込み。少ないうちは 1.0。"""
+    """過去の手順の 実績÷見込み（直近 RATIO_WINDOW 手順）。記録が少ないうちは 1.0 に寄せる。"""
     rows = [h for h in history if h.get("est", 0) > 0 and h.get("actual", 0) > 0]
     rows = rows[-RATIO_WINDOW:]
-    if len(rows) < RATIO_MIN_SAMPLES:
-        return 1.0
-    r = sum(h["actual"] for h in rows) / sum(h["est"] for h in rows)
-    return min(max(r, RATIO_MIN), RATIO_MAX)
+    return _shrink(sum(h["actual"] for h in rows), sum(h["est"] for h in rows), 1.0, HIST_PRIOR_MIN)
+
+
+def plan_ratio(items, at: datetime, r: float) -> float:
+    """この計画で終わった手順の 実績÷見込み を、履歴の補正 r に混ぜる。
+
+    見込みの癖は依頼ごとに違うので、同じ計画の実績がいちばん当たる（過去の記録での比較で、
+    履歴だけの補正より予測と実績のずれが小さかった）。
+    """
+    done = [lf for lf in leaves(items) if lf["state"] == DONE and float(lf["est_min"]) > 0]
+    actual = sum(elapsed_min(lf, at) for lf in done)
+    est = sum(float(lf["est_min"]) for lf in done)
+    return _shrink(actual, est, r, PLAN_PRIOR_MIN)
 
 
 def leaf_remaining(leaf, at: datetime, r: float) -> float:

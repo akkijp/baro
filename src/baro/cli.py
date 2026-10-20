@@ -328,9 +328,8 @@ def cmd_stats(args):
     recent = rows[-clock.RATIO_WINDOW:]
     raw = sum(h["actual"] for h in recent) / sum(h["est"] for h in recent)
     print(f"記録 {len(rows)} 手順（補正には直近 {len(recent)} 手順を使用）")
-    print(f"実績 ÷ 見込み = {raw:.2f} 倍 → 補正 ×{r:.1f}")
-    if len(recent) < clock.RATIO_MIN_SAMPLES:
-        print(f"  {clock.RATIO_MIN_SAMPLES} 手順記録されるまでは補正しません（×1.0）")
+    print(f"実績 ÷ 見込み = {raw:.2f} 倍 → 補正 ×{r:.2f}（記録が少ないうちは 1.0 に寄せる）")
+    print("  計画の途中では、その計画で終わった手順の実績も混ぜて補正します")
     ok = sum(1 for h in recent if h["actual"] <= h["est"] + 0.5)
     print(f"見込みどおり {ok}/{len(recent)} 手順")
     worst = sorted(recent, key=lambda h: h["actual"] - h["est"], reverse=True)[:5]
@@ -448,6 +447,8 @@ def build_parser():
     a.set_defaults(fn=cmd_stats)
 
     a = sub.add_parser("statusline", help="（Claude Code の statusLine から呼ぶ）")
+    a.add_argument("--no-chain", action="store_true", help="元の statusLine へ渡さない（mod の帯から呼ぶとき）")
+    a.add_argument("--width", type=int, help="表示幅（省略時は端末の幅）")
     a.set_defaults(fn=hooks.statusline)
 
     a = sub.add_parser("hook", help="（Claude Code のフックから呼ぶ）")

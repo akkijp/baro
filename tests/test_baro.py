@@ -1,3 +1,4 @@
+import argparse
 import io
 import json
 import os
@@ -101,12 +102,20 @@ class ClockTest(unittest.TestCase):
         self.assertEqual(clock.leaf_remaining(self.leaf(10, state=clock.DONE), at(0), 1.0), 0)
 
     def test_ratio(self):
-        few = [{"est": 10, "actual": 20}] * 9
-        self.assertEqual(clock.ratio(few), 1.0)
-        self.assertAlmostEqual(clock.ratio(few + [{"est": 10, "actual": 20}]), 2.0)
-        self.assertAlmostEqual(clock.ratio([{"est": 10, "actual": 12}] * 10), 1.2)
-        self.assertEqual(clock.ratio([{"est": 10, "actual": 50}] * 10), clock.RATIO_MAX)
-        self.assertEqual(clock.ratio([{"est": 10, "actual": 1}] * 10), clock.RATIO_MIN)
+        self.assertEqual(clock.ratio([]), 1.0)
+        # 記録が少ないうちは 1.0 に寄せ、増えるほど実績の倍率に近づく
+        self.assertAlmostEqual(clock.ratio([{"est": 10, "actual": 20}] * 2), (40 + 20) / (20 + 20))
+        self.assertAlmostEqual(clock.ratio([{"est": 10, "actual": 20}] * 50), (1000 + 20) / (500 + 20))
+        self.assertEqual(clock.ratio([{"est": 10, "actual": 100}] * 50), clock.RATIO_MAX)
+        self.assertEqual(clock.ratio([{"est": 10, "actual": 0.1}] * 50), clock.RATIO_MIN)
+
+    def test_plan_ratio(self):
+        # 終わった手順が無ければ履歴の補正のまま
+        todo = [self.leaf(10, [], clock.TODO)]
+        self.assertAlmostEqual(clock.plan_ratio(todo, at(0), 1.2), 1.2)
+        # 10 分の見込みを 2 分で終えた計画は、履歴の補正 1.0 より小さく見積もる
+        done = [self.leaf(10, [(at(0), at(2))], clock.DONE), self.leaf(10, [], clock.TODO)]
+        self.assertAlmostEqual(clock.plan_ratio(done, at(2), 1.0), (2 + 1.0 * 10) / (10 + 10))
 
     def test_pause_does_not_count(self):
         data = {"items": [self.leaf(10, [(at(0), None)], clock.DOING)]}
@@ -122,10 +131,14 @@ class RenderTest(unittest.TestCase):
         self.assertEqual(render.dw("ab"), 2)
 
     def test_bar(self):
-        self.assertEqual(render.bar(0.41, 10, "🟨"), "🟩" * 4 + "🟨" + "⬜" * 5)
-        self.assertEqual(render.bar(0.99, 10, "🟨"), "🟩" * 9 + "🟨")
-        self.assertEqual(render.bar(0.5, 4, "", complete=True), "🟩" * 4)
-        self.assertEqual(render.bar(0.0, 5), "⬜" * 5)
+        self.assertEqual(render.bar(0.41, 10, clock.DOING), "█" * 4 + "▓" + "░" * 5)
+        self.assertEqual(render.bar(0.99, 10, clock.DOING), "█" * 9 + "▓")
+        self.assertEqual(render.bar(0.5, 4, "", complete=True), "█" * 4)
+        self.assertEqual(render.bar(0.0, 5), "░" * 5)
+        # ステータスラインでは色を付け、色の指定は幅に数えない
+        colored = render.bar(0.41, 10, clock.DOING, color=True)
+        self.assertIn("\x1b[32m████\x1b[0m", colored)
+        self.assertEqual(render.dw(colored), 10)
 
     def test_dur_and_clock(self):
         self.assertEqual(render.dur(25.2, up=True), "26分")
@@ -151,7 +164,7 @@ class FlowTest(Env):
         _, line, _ = self.run_cli("show", "--line")
         # 経過 18 分・残り 3 + 13 + 10 = 26 分
         self.assertEqual(line.strip(),
-                         "⏳ 残り約 26分（終了予定 15:14） 🟩🟩🟩🟩🟨⬜⬜⬜⬜⬜ 40% ・ 2.2 設計書を書く 7/10分")
+                         "███▓░░░░░░ 3/7 ｜ 今: 2.2 設計書を書く（経過7分・残り約4分） ｜ 残り全体 約29分（15:17）")
 
         _, detail, _ = self.run_cli("show")
         rows = [ln for ln in detail.splitlines() if "分" in ln and ("├─" in ln or "└─" in ln)]
@@ -164,9 +177,13 @@ class FlowTest(Env):
         self.run_cli("wait", "2.2", "公開してよいか")
         self.t = at(40)
         _, line, _ = self.run_cli("show", "--line")
-        self.assertTrue(line.startswith("🙋 回答待ち: 公開してよいか"), line)
-        self.assertIn("再開後 残り約 26分", line)
-        ctx = self.run_hook(hooks.hook, mock.Mock(event="prompt"), {"session_id": "sess-1"})
+        self.assertIn("｜ 🙋 回答待ち: 公開してよいか ｜", line)
+        self.assertIn("再開後 残り約29分", line)
+        # バックグラウンドの完了通知などの回では、回答待ちのまま
+        self.run_hook(hooks.hook, mock.Mock(event="prompt"),
+                      {"session_id": "sess-1", "prompt": "<task-notification>\n<task-id>x</task-id>"})
+        self.assertEqual((self.data().get("paused") or {}).get("kind"), "wait")
+        ctx = self.run_hook(hooks.hook, mock.Mock(event="prompt"), {"session_id": "sess-1", "prompt": "公開して"})
         self.assertIn("additionalContext", ctx)
         self.t = at(41)
         lf = clock.find(self.data()["items"], "2.2")
@@ -177,7 +194,7 @@ class FlowTest(Env):
         self.run_hook(hooks.hook, mock.Mock(event="stop"), {"session_id": "sess-1"})
         self.t = at(60)
         _, line, _ = self.run_cli("show", "--line")
-        self.assertTrue(line.startswith("💤 一時停止中"), line)
+        self.assertIn("💤 次の指示待ち", line)
         self.run_hook(hooks.hook, mock.Mock(event="prompt"), {"session_id": "sess-1"})
 
         self.run_cli("est", "2.3", "20", "-r", "画像が多い")
@@ -217,8 +234,20 @@ class FlowTest(Env):
         with mock.patch.object(sys, "stdin", fake_in), redirect_stdout(out), \
                 mock.patch.object(hooks, "_tty_width", return_value=30):
             hooks.statusline(None)
-        self.assertTrue(out.getvalue().startswith("⏳ 残り約 15分"), out.getvalue())
+        self.assertIn("約15分", out.getvalue())
         self.assertLessEqual(render.dw(out.getvalue().strip()), 26)
+
+    def test_statusline_for_band(self):
+        self.run_cli("plan", "a", stdin="x 5\ny 5\nz 5\n")
+        out = io.StringIO()
+        fake_in = io.TextIOWrapper(io.BytesIO(json.dumps({"session_id": "sess-1"}).encode()))
+        args = argparse.Namespace(no_chain=True, width=30)
+        with mock.patch.object(sys, "stdin", fake_in), redirect_stdout(out), \
+                mock.patch.object(hooks, "_chain") as chain:
+            hooks.statusline(args)
+        chain.assert_not_called()
+        self.assertIn("約15分", out.getvalue())
+        self.assertLessEqual(render.dw(out.getvalue().strip()), 30)
 
     def test_rules_install(self):
         home = Path(self.tmp.name) / "home"
