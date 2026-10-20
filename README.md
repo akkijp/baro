@@ -10,8 +10,8 @@ Claude Code（CLI）に頼んだ仕事の「あと何分待てばよいか」を
 ```sh
 uv tool install -e ~/Documents/GitHub/akkijp/baro   # ~/.local/bin/baro
 baro setup            # 変更点を見る
-baro setup --apply    # ~/.claude/settings.json に statusLine と Stop / UserPromptSubmit フックをつなぐ（控えを取る）
-baro doctor           # 点検
+baro setup --apply    # ~/.claude/settings.json に statusLine と Stop / UserPromptSubmit フックを組み込む（バックアップを取る）
+baro doctor           # 設定の確認
 ```
 
 外すときは `baro setup --undo --apply`。

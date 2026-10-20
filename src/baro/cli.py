@@ -35,14 +35,14 @@ def _resolve(args, for_write: bool) -> str:
     if not for_write and len(live) == 1:
         return live[0][0]
     if not for_write and len(live) > 1:
-        raise BaroError("計画のあるセッションが複数あります。baro ls で見て、--session で選んでください")
-    raise BaroError("セッションが分かりません（CLAUDE_CODE_SESSION_ID が無い）。--session で指定してください")
+        raise BaroError("計画のあるセッションが複数あります。baro ls で確認し、--session で指定してください")
+    raise BaroError("セッションを特定できません（CLAUDE_CODE_SESSION_ID がありません）。--session で指定してください")
 
 
 def _load_or_die(sid):
     data = store.load(sid)
     if data is None:
-        raise BaroError("計画がありません。baro plan で始めてください")
+        raise BaroError("計画がありません。baro plan で作成してください")
     return data
 
 
@@ -59,7 +59,7 @@ def _mutate(sid, fn):
 def _leaf(data, item_id):
     it = clock.find(data["items"], item_id)
     if it is None:
-        raise BaroError(f"{item_id} という手順はありません")
+        raise BaroError(f"手順 {item_id} はありません")
     if not clock.is_leaf(it):
         raise BaroError(f"{item_id} は段階です。手順の番号（例: {item_id}.1）を指定してください")
     return it
@@ -90,20 +90,20 @@ def parse_outline(text: str):
         indent = len(raw) - len(raw.lstrip(" "))
         level = indent // 2
         if level > prev_level + 1:
-            raise BaroError(f"{no} 行目: 字下げが深すぎます")
+            raise BaroError(f"{no} 行目: インデントが深すぎます")
         if level >= MAX_DEPTH:
-            raise BaroError(f"{no} 行目: 入れ子は {MAX_DEPTH} 段までです")
+            raise BaroError(f"{no} 行目: 階層は {MAX_DEPTH} 段までです")
         while stack[-1][0] >= level:
             stack.pop()
         owner = stack[-1][2]
         if owner is not None and clock.is_leaf(owner):
-            raise BaroError(f"{no} 行目: 見込みのある行の下に手順は置けません")
+            raise BaroError(f"{no} 行目: 見込み時間のある行の下に手順は置けません")
         body = raw.strip()
         m = _EST.match(body)
         if m and m.group(1).strip():
             node = {"name": m.group(1).strip(), "est_min": float(m.group(2)), "state": TODO, "spans": []}
             if node["est_min"] <= 0:
-                raise BaroError(f"{no} 行目: 見込みは 1 分以上にしてください")
+                raise BaroError(f"{no} 行目: 見込み時間は 1 分以上にしてください")
         else:
             node = {"name": body, "children": []}
         stack[-1][1].append(node)
@@ -112,7 +112,7 @@ def parse_outline(text: str):
     _number(root)
     _check_phases(root)
     if not list(clock.leaves(root)):
-        raise BaroError("手順がありません（行末に見込みの分を書いてください）")
+        raise BaroError("手順がありません（行末に見込み時間を分で書いてください）")
     return root
 
 
@@ -148,7 +148,7 @@ def cmd_plan(args):
             s = clock.summarize(old, at, 1.0)
             if not s.complete and not args.replace:
                 raise BaroError(f"進行中の計画があります（{old.get('title')}）。"
-                                "続けるなら baro start、作り直すなら --replace")
+                                "続けるなら baro start、作り直すなら --replace を付けてください")
             store.archive(sid)
         data = {
             "version": 1,
@@ -180,7 +180,7 @@ def cmd_start(args):
         clock.resume(data, at)
         others = _others_doing(data, args.id)
         if others:
-            _warn(f"{'・'.join(others)} が作業中のままです。終えたなら baro done で閉じてください")
+            _warn(f"{'・'.join(others)} が作業中のままです。終わっていれば baro done で完了にしてください")
         lf["state"] = DOING
         lf.pop("note", None)
         clock.open_span(lf, at)
@@ -232,9 +232,9 @@ def cmd_add(args):
         else:
             parent = clock.find(data["items"], args.where)
             if parent is None:
-                raise BaroError(f"{args.where} という段階はありません")
+                raise BaroError(f"段階 {args.where} はありません")
             if clock.is_leaf(parent):
-                raise BaroError(f"{args.where} は手順です。足す先には段階の番号か top を指定してください")
+                raise BaroError(f"{args.where} は手順です。追加先には段階の番号か top を指定してください")
             siblings, prefix = parent["children"], parent["id"] + "."
         last = max((int(it["id"].rsplit(".", 1)[-1]) for it in siblings), default=0)
         node = {"id": f"{prefix}{last + 1}", "name": args.name, "est_min": float(args.minutes),
@@ -248,7 +248,7 @@ def cmd_add(args):
         siblings.insert(pos, node)
         data["events"].append({"at": clock.iso(at), "kind": "add", "id": node["id"], "name": args.name,
                                "est": float(args.minutes), "reason": args.reason})
-        print(f"{node['id']} を足しました", file=sys.stderr)
+        print(f"{node['id']} を追加しました", file=sys.stderr)
     _print_line(*_mutate(_resolve(args, True), fn))
 
 
@@ -274,7 +274,7 @@ def cmd_skip(args):
     def fn(data, at):
         it = clock.find(data["items"], args.id)
         if it is None:
-            raise BaroError(f"{args.id} という手順はありません")
+            raise BaroError(f"手順 {args.id} はありません")
         for lf in ([it] if clock.is_leaf(it) else list(clock.leaves(it["children"]))):
             clock.close_span(lf, at)
             if lf["state"] != DONE:
@@ -322,14 +322,14 @@ def cmd_stats(args):
     rows = [h for h in hist if h.get("est", 0) > 0 and h.get("actual", 0) > 0]
     r = clock.ratio(hist)
     if not rows:
-        print("まだ記録がありません（baro done で手順を終えるとたまります）")
+        print("まだ記録がありません（baro done で手順を完了すると記録されます）")
         return
     recent = rows[-clock.RATIO_WINDOW:]
     raw = sum(h["actual"] for h in recent) / sum(h["est"] for h in recent)
-    print(f"記録 {len(rows)} 手順（補正に使うのは直近 {len(recent)}）")
+    print(f"記録 {len(rows)} 手順（補正には直近 {len(recent)} 手順を使用）")
     print(f"実績 ÷ 見込み = {raw:.2f} 倍 → 補正 ×{r:.1f}")
     if len(recent) < clock.RATIO_MIN_SAMPLES:
-        print(f"  {clock.RATIO_MIN_SAMPLES} 手順たまるまでは補正しません（×1.0）")
+        print(f"  {clock.RATIO_MIN_SAMPLES} 手順記録されるまでは補正しません（×1.0）")
     ok = sum(1 for h in recent if h["actual"] <= h["est"] + 0.5)
     print(f"見込みどおり {ok}/{len(recent)} 手順")
     worst = sorted(recent, key=lambda h: h["actual"] - h["est"], reverse=True)[:5]
@@ -344,32 +344,32 @@ def cmd_stats(args):
 # --- 入口 ---------------------------------------------------------------------
 
 def build_parser():
-    p = argparse.ArgumentParser(prog="baro", description="Claude Code の作業の残り時間と進み具合")
-    p.add_argument("--session", help="セッション ID（ふつうは CLAUDE_CODE_SESSION_ID から自動）")
+    p = argparse.ArgumentParser(prog="baro", description="Claude Code の作業の残り時間と進捗")
+    p.add_argument("--session", help="セッション ID（通常は CLAUDE_CODE_SESSION_ID から自動取得）")
     sub = p.add_subparsers(dest="cmd")
 
-    a = sub.add_parser("plan", help="計画を立てる（手順は標準入力）")
+    a = sub.add_parser("plan", help="計画を作成する（手順は標準入力から）")
     a.add_argument("title")
     a.add_argument("--file")
     a.add_argument("--replace", action="store_true", help="進行中の計画を置き換える")
     a.set_defaults(fn=cmd_plan)
 
-    a = sub.add_parser("start", help="手順に取りかかる")
+    a = sub.add_parser("start", help="手順を開始する")
     a.add_argument("id")
     a.set_defaults(fn=cmd_start)
 
-    a = sub.add_parser("done", help="手順を終える")
+    a = sub.add_parser("done", help="手順を完了する")
     a.add_argument("id")
     a.add_argument("-m", help="メモ")
     a.set_defaults(fn=cmd_done)
 
-    a = sub.add_parser("est", help="見込みを直す")
+    a = sub.add_parser("est", help="見込み時間を変更する")
     a.add_argument("id")
     a.add_argument("minutes", type=float)
     a.add_argument("-r", "--reason", required=True)
     a.set_defaults(fn=cmd_est)
 
-    a = sub.add_parser("add", help="手順を足す（先は段階の番号か top）")
+    a = sub.add_parser("add", help="手順を追加する（追加先は段階の番号か top）")
     a.add_argument("where")
     a.add_argument("name")
     a.add_argument("minutes", type=float)
@@ -377,22 +377,22 @@ def build_parser():
     a.add_argument("-r", "--reason", required=True)
     a.set_defaults(fn=cmd_add)
 
-    a = sub.add_parser("wait", help="返事待ちにする（時計を止める）")
+    a = sub.add_parser("wait", help="回答待ちにする（時間の計測を止める）")
     a.add_argument("id")
     a.add_argument("question")
     a.set_defaults(fn=cmd_wait)
 
-    a = sub.add_parser("block", help="止まっている手順にする")
+    a = sub.add_parser("block", help="手順を停止中にする")
     a.add_argument("id")
     a.add_argument("reason")
     a.set_defaults(fn=cmd_block)
 
-    a = sub.add_parser("skip", help="取りやめる（全体から外す）")
+    a = sub.add_parser("skip", help="手順を中止する（全体から外す）")
     a.add_argument("id")
     a.add_argument("-r", "--reason", required=True)
     a.set_defaults(fn=cmd_skip)
 
-    a = sub.add_parser("end", help="計画を閉じる")
+    a = sub.add_parser("end", help="計画を終了する")
     a.set_defaults(fn=cmd_end)
 
     a = sub.add_parser("show", help="表示する")
@@ -401,10 +401,10 @@ def build_parser():
     a.set_defaults(fn=cmd_show)
 
     a = sub.add_parser("ls", help="計画のあるセッションの一覧")
-    a.add_argument("--all", action="store_true", help="終わったもの・古いものも")
+    a.add_argument("--all", action="store_true", help="終了したもの・古いものも含める")
     a.set_defaults(fn=cmd_ls)
 
-    a = sub.add_parser("stats", help="見込みの当たり具合")
+    a = sub.add_parser("stats", help="見込み時間の精度")
     a.set_defaults(fn=cmd_stats)
 
     a = sub.add_parser("statusline", help="（Claude Code の statusLine から呼ぶ）")
@@ -414,12 +414,12 @@ def build_parser():
     a.add_argument("event", choices=["stop", "prompt"])
     a.set_defaults(fn=hooks.hook)
 
-    a = sub.add_parser("setup", help="Claude Code の設定に baro をつなぐ")
-    a.add_argument("--apply", action="store_true", help="実際に書き換える（無ければ変更点を出すだけ）")
-    a.add_argument("--undo", action="store_true", help="つないだものを外す")
+    a = sub.add_parser("setup", help="Claude Code の設定に baro を組み込む")
+    a.add_argument("--apply", action="store_true", help="実際に書き換える（指定しない場合は変更点の表示のみ）")
+    a.add_argument("--undo", action="store_true", help="組み込んだ設定を外す")
     a.set_defaults(fn=hooks.setup)
 
-    a = sub.add_parser("doctor", help="設定の点検")
+    a = sub.add_parser("doctor", help="設定の確認")
     a.set_defaults(fn=hooks.doctor)
     return p
 

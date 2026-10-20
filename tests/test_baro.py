@@ -140,7 +140,7 @@ class FlowTest(Env):
         code, out, _ = self.run_cli("plan", "採用ページ", stdin=OUTLINE)
         self.assertEqual(code, 0, out)
         self.assertIn("📋 採用ページ", out)
-        self.assertIn("⏳ 残り約 43分（15:13 ごろ）", out)
+        self.assertIn("⏳ 残り約 43分（終了予定 15:13）", out)
 
         self.run_cli("start", "1.1"); self.t = at(2)
         self.run_cli("done", "1.1"); self.run_cli("start", "1.2"); self.t = at(6)
@@ -151,21 +151,21 @@ class FlowTest(Env):
         _, line, _ = self.run_cli("show", "--line")
         # 経過 18 分・残り 3 + 13 + 10 = 26 分
         self.assertEqual(line.strip(),
-                         "⏳ 残り約 26分（15:14 ごろ） 🟩🟩🟩🟩🟨⬜⬜⬜⬜⬜ 40% ・ 2.2 設計書を書く 7/10分")
+                         "⏳ 残り約 26分（終了予定 15:14） 🟩🟩🟩🟩🟨⬜⬜⬜⬜⬜ 40% ・ 2.2 設計書を書く 7/10分")
 
         _, detail, _ = self.run_cli("show")
         rows = [ln for ln in detail.splitlines() if "分" in ln and ("├─" in ln or "└─" in ln)]
         cols = {render.dw(ln[:ln.index("/")]) for ln in rows}
         self.assertEqual(len(cols), 1, detail)  # 時間の列がそろっている
         self.assertIn("🔺+1分", detail)          # 1.2 は 3 分の見込みで 4 分
-        self.assertIn("◀ いまここ", detail)
+        self.assertIn("◀ 作業中", detail)
 
         # 返事待ちは時計を止め、返事（prompt フック）で動かし直す
         self.run_cli("wait", "2.2", "公開してよいか")
         self.t = at(40)
         _, line, _ = self.run_cli("show", "--line")
-        self.assertTrue(line.startswith("🙋 あなたの返事待ち: 公開してよいか"), line)
-        self.assertIn("返事のあと約 26分", line)
+        self.assertTrue(line.startswith("🙋 回答待ち: 公開してよいか"), line)
+        self.assertIn("再開後 残り約 26分", line)
         ctx = self.run_hook(hooks.hook, mock.Mock(event="prompt"), {"session_id": "sess-1"})
         self.assertIn("additionalContext", ctx)
         self.t = at(41)
@@ -177,7 +177,7 @@ class FlowTest(Env):
         self.run_hook(hooks.hook, mock.Mock(event="stop"), {"session_id": "sess-1"})
         self.t = at(60)
         _, line, _ = self.run_cli("show", "--line")
-        self.assertTrue(line.startswith("💤 Claude は止まっています"), line)
+        self.assertTrue(line.startswith("💤 一時停止中"), line)
         self.run_hook(hooks.hook, mock.Mock(event="prompt"), {"session_id": "sess-1"})
 
         self.run_cli("est", "2.3", "20", "-r", "画像が多い")

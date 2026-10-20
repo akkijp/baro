@@ -117,21 +117,21 @@ def line(data, at: datetime, r: float, width=None) -> str:
         return fit([f"✅ 完了 {dur(s.elapsed)}（見込み {dur(planned)}） {b}",
                     f"✅ 完了 {dur(s.elapsed)}"], width)
     if paused.get("kind") == "wait":
-        head = f"🙋 あなたの返事待ち: {paused.get('question', '')}"
-        return fit([f"{head} {b} {pct} ・ 返事のあと約 {rem}",
+        head = f"🙋 回答待ち: {paused.get('question', '')}"
+        return fit([f"{head} {b} {pct} ・ 再開後 残り約 {rem}",
                     f"{head} {pct}",
-                    f"🙋 返事待ち {pct}"], width)
+                    f"🙋 回答待ち {pct}"], width)
     if paused.get("kind") == "stopped":
-        head = "💤 Claude は止まっています（あなたの番）"
-        return fit([f"{head} {b} {pct} ・ 残り約 {rem}ぶん",
+        head = "💤 一時停止中（次の指示待ち）"
+        return fit([f"{head} {b} {pct} ・ 再開後 残り約 {rem}",
                     f"{head} {pct}",
-                    f"💤 あなたの番 {pct}"], width)
+                    f"💤 指示待ち {pct}"], width)
     if s.blocked and not s.current:
         lf = s.blocked[0]
         head = f"🟥 {lf['id']} {lf['name']}: {lf.get('note', '')}"
-        return fit([f"{head} {b} {pct}", head, f"🟥 止まっています {pct}"], width)
+        return fit([f"{head} {b} {pct}", head, f"🟥 停止中 {pct}"], width)
 
-    head = f"⏳ 残り約 {rem}（{clock_at(at, s.finish)} ごろ）"
+    head = f"⏳ 残り約 {rem}（終了予定 {clock_at(at, s.finish)}）"
     if s.current:
         step = _step_text(s.current[0], at)
     elif s.next_todo:
@@ -157,13 +157,13 @@ def _leaf_cols(lf, at):
     if lf["state"] in (DONE, DOING) and over >= 1:
         extra.append(f"🔺+{over}分")
     if lf["state"] == DOING:
-        extra.append("◀ いまここ")
+        extra.append("◀ 作業中")
     elif lf["state"] == WAIT:
-        extra.append(f"◀ 返事待ち: {lf.get('note', '')}")
+        extra.append(f"◀ 回答待ち: {lf.get('note', '')}")
     elif lf["state"] == BLOCK:
-        extra.append(f"◀ 止まっている: {lf.get('note', '')}")
+        extra.append(f"◀ 停止中: {lf.get('note', '')}")
     elif lf["state"] == SKIP:
-        extra.append("取りやめ")
+        extra.append("中止")
     return t, " ".join(extra)
 
 
@@ -200,11 +200,11 @@ def _tree(items, at, r, paused, prefix=""):
 def _event_text(ev) -> str:
     k = ev.get("kind")
     if k == "est":
-        return f"・見込みを直した {ev['id']} {num(ev['from'])}→{num(ev['to'])}分: {ev.get('reason', '')}"
+        return f"・見込み変更 {ev['id']} {num(ev['from'])}→{num(ev['to'])}分: {ev.get('reason', '')}"
     if k == "add":
-        return f"・手順を足した {ev['id']} {ev.get('name', '')} {num(ev.get('est', 0))}分: {ev.get('reason', '')}"
+        return f"・手順追加 {ev['id']} {ev.get('name', '')} {num(ev.get('est', 0))}分: {ev.get('reason', '')}"
     if k == "skip":
-        return f"・取りやめた {ev['id']}: {ev.get('reason', '')}"
+        return f"・中止 {ev['id']}: {ev.get('reason', '')}"
     return ""
 
 
@@ -225,16 +225,16 @@ def detail(data, at: datetime, r: float) -> str:
         if worst is not None:
             d = int(round(clock.elapsed_min(worst, at) - float(worst["est_min"])))
             if d >= 1:
-                tail += f" ・ いちばん延びた: {worst['id']} {worst['name']} +{d}分"
+                tail += f" ・ 最も延びた: {worst['id']} {worst['name']} +{d}分"
         out.append(tail)
     else:
         rem = dur(s.remaining, up=True)
         if paused.get("kind") == "wait":
-            head = f"   🙋 あなたの返事待ち: {paused.get('question', '')} ・ 返事のあと約 {rem}"
+            head = f"   🙋 回答待ち: {paused.get('question', '')} ・ 再開後 残り約 {rem}"
         elif paused.get("kind") == "stopped":
-            head = f"   💤 Claude は止まっています（あなたの番） ・ 残り約 {rem}ぶん"
+            head = f"   💤 一時停止中（次の指示待ち） ・ 再開後 残り約 {rem}"
         else:
-            head = f"   ⏳ 残り約 {rem}（{clock_at(at, s.finish)} ごろ）"
+            head = f"   ⏳ 残り約 {rem}（終了予定 {clock_at(at, s.finish)}）"
         head += f" ・ 🕒 {dur(s.elapsed)} / 全体 {dur(s.total, up=True)}"
         if abs(r - 1.0) > 1e-9:
             head += f" ・ 補正 ×{r:.1f}"
@@ -248,7 +248,7 @@ def detail(data, at: datetime, r: float) -> str:
             out.append("   " + t)
     if len(s.current) > 1:
         ids = "・".join(lf["id"] for lf in s.current)
-        out.append(f"   注意: 作業中が {len(s.current)} つあります（{ids}）。終えたものは baro done で閉じてください")
+        out.append(f"   注意: 作業中の手順が {len(s.current)} つあります（{ids}）。終わったものは baro done で完了にしてください")
 
     rows = _tree(data["items"], at, r, s.paused)
     namew = max(dw(lb) for lb, _, _ in rows) + 2
@@ -265,7 +265,7 @@ def detail(data, at: datetime, r: float) -> str:
 def listing(sessions, at: datetime, r: float) -> str:
     """sessions = [(sid, data, mtime)]"""
     if not sessions:
-        return "動いている計画はありません"
+        return "進行中の計画はありません"
     names = []
     for sid, data, _ in sessions:
         cwd = data.get("cwd") or ""
@@ -277,6 +277,6 @@ def listing(sessions, at: datetime, r: float) -> str:
         text = line(data, at, r)
         idle_h = (at.timestamp() - mtime) / 3600
         if idle_h >= 24:
-            text += f"（放置 {int(idle_h)} 時間）"
+            text += f"（{int(idle_h)} 時間更新なし）"
         out.append(f"{branch}{pad(name, nw)}{text}")
     return "\n".join(out)
