@@ -231,6 +231,11 @@ class FlowTest(Env):
             _, out, _ = self.run_cli("rules", "--install")
             self.assertIn("すでに", out)
             self.assertEqual(md.read_text(), cli.RULES)
+            md.write_text("# mine\n\n" + cli.RULES)
+            self.run_cli("rules", "--remove")
+            self.assertEqual(md.read_text(), "# mine\n")
+            _, out, _ = self.run_cli("rules", "--remove")
+            self.assertIn("ありません", out)
 
     def test_setup_and_undo(self):
         path = Path(os.environ["BARO_SETTINGS"])

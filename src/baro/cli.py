@@ -359,11 +359,19 @@ RULES = """\
 
 
 def cmd_rules(args):
+    md = pathlib.Path.home() / ".claude" / "CLAUDE.md"
+    cur = md.read_text("utf-8") if md.exists() else ""
+    if args.remove:
+        if RULES not in cur:
+            print(f"{md} に baro rules --install で追記した文面はありません"
+                  + ("（baro の記述はありますが、手で直されています。手で消してください）" if "baro" in cur else ""))
+            return
+        md.write_text(cur.replace(RULES, "").rstrip("\n") + "\n" if cur.replace(RULES, "").strip() else "", "utf-8")
+        print(f"{md} から削除しました")
+        return
     if not args.install:
         print(RULES, end="")
         return
-    md = pathlib.Path.home() / ".claude" / "CLAUDE.md"
-    cur = md.read_text("utf-8") if md.exists() else ""
     if "baro" in cur:
         print(f"{md} にはすでに baro の記述があります（何もしていません）")
         return
@@ -453,6 +461,7 @@ def build_parser():
 
     a = sub.add_parser("rules", help="CLAUDE.md に書くルールの文面を出す")
     a.add_argument("--install", action="store_true", help="~/.claude/CLAUDE.md に追記する（すでにあれば何もしない）")
+    a.add_argument("--remove", action="store_true", help="--install で追記した文面を ~/.claude/CLAUDE.md から削除する")
     a.set_defaults(fn=cmd_rules)
 
     a = sub.add_parser("doctor", help="設定の確認")

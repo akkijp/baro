@@ -160,12 +160,32 @@ baro end                               # 計画を終了
 
 ## アンインストール
 
-```sh
-baro setup --undo --apply   # settings.json を元に戻す
-uv tool uninstall baro      # または pipx uninstall baro
+### 方法 1: Claude Code にプロンプトを貼る
+
+```
+baro を外してください。
+1. `baro setup --undo --apply` を実行する（~/.claude/settings.json の statusLine とフックを元に戻す）。
+2. `baro rules --remove` を実行する（~/.claude/CLAUDE.md から baro のルールを消す）。
+3. baro を入れたツールで消す: `uv tool uninstall baro`。uv で入れていなければ `pipx uninstall baro`、それも違えば `python3 -m pip uninstall baro`。
+4. `~/.claude/baro/` に計画の記録が残っている。消してよいか私に聞いてから、消す場合は `trash` か `rm -r` で消す。
+5. 最後に、Claude Code を起動し直すと設定が反映されることを伝える。
 ```
 
-CLAUDE.md に追記したルールと `~/.claude/baro/` は手で消してください。
+### 方法 2: 手で外す
+
+```sh
+baro setup --undo --apply   # settings.json の statusLine とフックを元に戻す
+baro rules --remove         # CLAUDE.md から baro のルールを消す（--install で足したものだけ）
+
+uv tool uninstall baro      # uv で入れた場合
+pipx uninstall baro         # pipx で入れた場合
+python3 -m pip uninstall baro   # pip で入れた場合
+
+rm -r ~/.claude/baro        # 計画の記録・実績。残しておいても害はありません
+```
+
+`baro setup --undo --apply` は、`baro setup --apply` が保存しておいた元の statusLine の command を書き戻し、追加した `Stop` / `UserPromptSubmit` のフックだけを外します。他のフックには触りません。
+settings.json のバックアップ（`~/.claude/settings.json.baro-bak-<日時>`）も残っているので、万一のときはそれを戻してください。
 
 ## 開発
 
