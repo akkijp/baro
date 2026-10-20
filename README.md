@@ -16,8 +16,6 @@ Claude Desktop の Code タブでは、入力欄の上の帯に同じ 1 行を�
 
 ## 画面
 
-ステータスライン（1 行。Desktop の Code タブでは入力欄の上の帯）:
-
 | 状態 | 表示 |
 |---|---|
 | 作業中 | `████▓░░░░░ 3/7 ｜ 今: 2.2 設計書を書く（経過7分・残り約4分） ｜ 残り全体 約26分（15:12）` |
@@ -45,16 +43,7 @@ Claude Desktop の Code タブでは、入力欄の上の帯に同じ 1 行を�
     └─ ⬜ 3.2 公開する                 -/ 5分
 ```
 
-バーは █ が済み、▓ が今の手順、░ が未着手です。ステータスラインでは █ を緑、▓ を状態の色（作業中は黄・回答待ちは青・停止中は赤）で出します。手順の行の印:
-
-| 印 | 意味 |
-|---|---|
-| 🟩 | 完了 |
-| 🟨 | 作業中 |
-| ⬜ | 未着手 |
-| 🟦 | 回答待ち（計測を止める） |
-| 🟥 | 停止中 |
-| ⬛ | 中止（全体から外す） |
+バーは █ が済み、▓ が今の手順、░ が未着手です。手順の印は 🟩 完了・🟨 作業中・⬜ 未着手・🟦 回答待ち・🟥 停止中・⬛ 中止。
 
 ## 必要なもの
 
@@ -63,8 +52,6 @@ Claude Desktop の Code タブでは、入力欄の上の帯に同じ 1 行を�
 - macOS / Linux
 
 ## インストール
-
-### 方法 1: Claude Code にプロンプトを貼る
 
 Claude Code に次の文を貼ると、Claude がインストールと設定を行います。
 
@@ -81,170 +68,25 @@ baro（https://github.com/akkijp/baro）を入れて、Claude Code につない�
 
 終わったら Claude Code を起動し直してください。次に 3 手順以上の依頼をすると、画面の下に残り時間が出ます。
 
-### 方法 2: 手で入れる
-
-```sh
-uv tool install git+https://github.com/akkijp/baro     # または pipx install git+https://github.com/akkijp/baro
-```
-
-`baro` は `~/.local/bin` に入ります。`which baro` で PATH に通っているか確認してください。
-
-```sh
-baro setup            # 変更点を表示する
-baro setup --apply    # ~/.claude/settings.json を書き換え、/baro-calibration スキルを入れる（バックアップを取ります）
-baro rules --install  # ~/.claude/CLAUDE.md に Claude 向けのルールを追記する
-baro doctor           # 設定の確認
-```
-
-Claude Code を起動し直すと有効になります。
-
-### `baro setup --apply` が書き換えるもの
-
-- `statusLine` を `baro statusline` にする。別の statusLine が設定済みなら、その command を `~/.claude/baro/config.json` に保存し、同じ入力を渡し続けます（画面の表示は baro の行に置き換わります）。
-- `Stop` フックに `baro hook stop` を足す（Claude の応答が終わったら計測を止める）。
-- `UserPromptSubmit` フックに `baro hook prompt` を足す（次の入力で計測を再開し、進行中の計画を Claude に知らせる）。
-- `~/.claude/skills/baro-calibration/` に `/baro-calibration` スキルを入れる（下の「見込みの補正」）。
-
-既存のフックはそのまま残ります。`baro rules --install` が追記する文面は `baro rules` で見られます。CLAUDE.md を自分で管理しているなら、その文面を好きな場所に貼ってください。
-
-### Claude Desktop の Code タブで使う
-
-Desktop の Code タブにはステータスラインが出ません。代わりに、同じ 1 行を入力欄の上の帯に出す mod（`mod/baro-band/`）を使います。
-mod は uv / pipx で入れた baro には含まれないので、リポジトリを clone し、そのフォルダを `~/.claude/settings.json` の `env` に書きます。
-
-```sh
-git clone https://github.com/akkijp/baro ~/.local/share/baro-src
-```
-
-```json
-{
-  "env": {
-    "CLAUDE_CODE_PLUGIN_DIRS": "/Users/you/.local/share/baro-src/mod/baro-band"
-  }
-}
-```
-
-パスは `~` を使わず絶対パスで書きます（`/Users/you` は自分のホームに置き換えてください）。`CLAUDE_CODE_PLUGIN_DIRS` が既にあれば、`:` で区切って後ろに足します。設定したら Claude Desktop を起動し直してください。
-
-- mod は `baro statusline --no-chain` の出力を描くだけです。計画と計測は baro が行います。
-- ターミナルではステータスラインと重なるので、帯は出しません。
-- `baro` が `~/.local/bin` か PATH に無いと、帯は出ません。
-- 帯は、ツールの実行が終わったとき・依頼を送ったとき・応答が終わったときと、30 秒ごとに描き直します。
-- 更新するときは、clone したフォルダで `git pull` してから Desktop を起動し直します。
+手で入れる方法・`baro setup --apply` が書き換えるもの・Claude Desktop の設定・アンインストールは [docs/install.md](docs/install.md)。
 
 ## 使い方
 
 ふだんは何もしなくてかまいません。3 手順以上になりそうな依頼をすると、Claude が計画を立て、画面の下に残り時間が出ます。
 
-人が打つコマンド:
-
-- `baro` — 今のセッションの詳しい表示（進行中の計画が 1 つなら自動で選びます）
+- `baro` — 今のセッションの詳しい表示
 - `baro ls` — 進行中の計画があるセッションの一覧
-- `baro stats` — 見込みの当たり具合（実績 ÷ 見込みの倍率と、延びやすい手順）
-- `baro calibrate` — テーマごとの見込みと実績を集計し、補正の設定を作り直す
-- `/baro-calibration`（Claude Code で）— テーマ分けをこの PC の仕事に合わせて詰める
+- `baro stats` — 見込みの当たり具合
 
-### 残り時間の決め方
+見込みは過去の実績で自動で補正されます。データはすべて `~/.claude/baro/` の下に置き、外部には何も送りません。
 
-- 見込みは Claude が手順ごとに付けた分数です。
-- 残り時間 = 作業中の手順の残り ＋ 未着手の手順の見込みの合計。
-- 回答待ち（🟦）と指示待ち（💤）の間は計測しません。
+## ドキュメント
 
-### 見込みの補正
-
-Claude の見込みは外れます。baro は終わった手順の実績を `~/.claude/baro/history.jsonl` に残し、実績 ÷ 見込みの倍率で残り時間を補正します。
-倍率は 0.1〜3.0 倍の範囲に収め、画面には補正後の残り時間と終了予定時刻だけを出します。
-
-倍率は 3 段で決めます。
-
-1. 過去の手順全体（直近 50 手順）。記録が少ないうちは 1.0 倍に寄せます。
-2. 手順のテーマ（調べる・作る・テスト・文書・git/PR・人の確認 など）ごと。git や PR はすぐ終わり、人の確認は延びる、といった違いを反映します。記録が少ないテーマは全体の倍率に寄せます。
-3. 同じ計画で終わった手順。見込みの癖は依頼ごとに違うので、これがいちばん当たります。
-
-補正は何もしなくても効きます。テーマ分けと重みは `~/.claude/baro/calibration.json` に置き、無ければ最初の表示で、その後は `baro end` のたびに、この PC の記録から作り直します。
-`baro calibrate` で、テーマごとの見込みと実績、過去の記録で試した予測のずれを確かめられます（`--list` で手順ごとのテーマ、`--json` で中身、`--dry-run` で書き込まずに試す）。
-
-テーマ分けを自分の仕事に合わせるには、Claude Code で `/baro-calibration` と打ちます。キーワードを直した候補を過去の記録で比べ、当たるようになるときだけ採用します。
-
-### Claude が呼ぶコマンド
-
-```sh
-baro plan "題名" <<'EOF'      # 計画を作る（インデント 2 文字で階層、行末に見込みの分）
-調べる
-  公開中のページを確認    2
-  画像の候補を集める      3
-作る
-  設計書を書く           10
-EOF
-
-baro start 2.1                         # 手順を開始
-baro done 2.1 [-m "メモ"]              # 手順を完了
-baro wait 2.1 "公開してよいですか？"   # 回答待ち（計測を止める）
-baro est 2.1 20 -r "理由"              # 見込みを変更（理由は必須）
-baro add 2 "権利確認" 5 -r "理由"      # 段階 2 に手順を追加（--after 2.1 で位置を指定・top で最上位）
-baro block 2.1 "鍵が無い"              # 停止中にする
-baro skip 2.1 -r "理由"                # 中止（全体から外す）
-baro show [--line]                     # 詳しい表示 / 1 行
-baro end                               # 計画を終了
-```
-
-セッションは環境変数 `CLAUDE_CODE_SESSION_ID` で見分けます（Claude Code の Bash には自動で入っています）。外から指定するときは `--session <id>`。
-
-## データの置き場
-
-すべて `~/.claude/baro/` の下に置き、外部には何も送りません。
-
-| ファイル | 内容 |
-|---|---|
-| `sessions/<session_id>.json` | 進行中の計画 |
-| `archive/` | 終了した計画 |
-| `history.jsonl` | 完了した手順の見込みと実績 |
-| `calibration.json` | 補正の設定（テーマ分け・重み・テーマごとの集計） |
-| `config.json` | 元の statusLine の command |
-
-## アンインストール
-
-### 方法 1: Claude Code にプロンプトを貼る
-
-```
-baro を外してください。
-1. `baro setup --undo --apply` を実行する（~/.claude/settings.json の statusLine とフックを元に戻し、/baro-calibration スキルを消す）。
-2. `baro rules --remove` を実行する（~/.claude/CLAUDE.md から baro のルールを消す）。
-3. 入れたツールで消す: `uv tool uninstall baro`。uv でなければ `pipx uninstall baro`、それも違えば `python3 -m pip uninstall baro`。
-4. ~/.claude/settings.json の `env` の `CLAUDE_CODE_PLUGIN_DIRS` に baro-band のパスがあれば、そのパスだけ外す（ほかに無ければキーごと消す）。clone したフォルダ（`~/.local/share/baro-src`）があれば、消してよいか私に聞く。
-5. `~/.claude/baro/` の記録を消してよいか私に聞き、よければ `trash` か `rm -r` で消す。
-6. 最後に、Claude Code（Desktop なら Claude Desktop）を起動し直すよう伝える。
-```
-
-### 方法 2: 手で外す
-
-```sh
-baro setup --undo --apply   # settings.json の statusLine とフックを元に戻し、/baro-calibration スキルを消す
-baro rules --remove         # CLAUDE.md から baro のルールを消す（--install で足したものだけ）
-
-uv tool uninstall baro      # 入れたツールに合わせて: pipx uninstall baro / python3 -m pip uninstall baro
-
-rm -r ~/.claude/baro        # 計画の記録。残しても害はありません
-```
-
-Desktop 用の mod を入れていたら、`~/.claude/settings.json` の `env` から `CLAUDE_CODE_PLUGIN_DIRS` の baro-band のパスを消し、clone したフォルダ（`~/.local/share/baro-src`）も消します。
-
-`baro setup --undo --apply` は、保存しておいた元の statusLine の command を書き戻し、足した `Stop` / `UserPromptSubmit` のフックだけを外します。settings.json のバックアップ（`~/.claude/settings.json.baro-bak-<日時>`）も残ります。
-
-## 開発
-
-```sh
-git clone https://github.com/akkijp/baro
-cd baro
-uv tool install -e .                   # 手元の変更がそのまま効く
-python3 -m unittest discover -s tests
-claude plugin validate mod/baro-band   # Desktop 用の mod の検査
-claude plugin test mod/baro-band       # mod のテスト
-```
-
-mod を手元で試すときは、`CLAUDE_CODE_PLUGIN_DIRS` に clone したフォルダの `mod/baro-band` を書くか、`claude --plugin-dir mod/baro-band` で起動します。
-
-設計の詳細は [docs/DESIGN.md](docs/DESIGN.md)。
+- [インストールの詳細・アンインストール](docs/install.md)
+- [コマンドとデータ](docs/commands.md) — Claude が呼ぶコマンド、Claude へのルール、保存ファイル
+- [残り時間と見込みの補正](docs/calibration.md)
+- [開発](docs/development.md)
+- [設計書](docs/DESIGN.md)
 
 ## ライセンス
 
