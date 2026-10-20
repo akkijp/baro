@@ -112,7 +112,7 @@ def overall_marker(s: clock.Summary) -> str:
 
 # --- 1 行 ---------------------------------------------------------------------
 
-def line(data, at: datetime, r: float, width=None, color: bool = False) -> str:
+def line(data, at: datetime, r, width=None, color: bool = False) -> str:
     r = clock.plan_ratio(data["items"], at, r)
     s = clock.summarize(data, at, r)
     b = bar(s.pct, 10, overall_marker(s), s.complete, color)
@@ -144,7 +144,7 @@ def line(data, at: datetime, r: float, width=None, color: bool = False) -> str:
     if s.current:
         lf = s.current[0]
         el = clock.elapsed_min(lf, at)
-        est = float(lf["est_min"]) * r
+        est = float(lf["est_min"]) * clock.rate(r, lf)
         name = f"今: {lf['id']} {lf['name']}"
         if el > est:
             step = f"{name}（経過{dur(el)}・見込み{dur(est, up=True)}を超過）"
@@ -223,7 +223,7 @@ def _event_text(ev) -> str:
     return ""
 
 
-def detail(data, at: datetime, r: float) -> str:
+def detail(data, at: datetime, r) -> str:
     r = clock.plan_ratio(data["items"], at, r)
     s = clock.summarize(data, at, r)
     planned = data.get("planned_total_min") or clock.planned_total(data["items"])
@@ -252,8 +252,6 @@ def detail(data, at: datetime, r: float) -> str:
         else:
             head = f"   ⏳ 残り約 {rem}（終了予定 {clock_at(at, s.finish)}）"
         head += f" ・ 🕒 {dur(s.elapsed)} / 全体 {dur(s.total, up=True)}"
-        if abs(r - 1.0) > 1e-9:
-            head += f" ・ 補正 ×{r:.2f}"
         out.append(head)
         b = bar(s.pct, 10, overall_marker(s))
         out.append(f"   {b} {int(s.pct * 100)}% ・ 手順 {s.steps_done}/{s.steps_total}")
@@ -278,7 +276,7 @@ def detail(data, at: datetime, r: float) -> str:
 
 # --- 一覧 ---------------------------------------------------------------------
 
-def listing(sessions, at: datetime, r: float) -> str:
+def listing(sessions, at: datetime, r) -> str:
     """sessions = [(sid, data, mtime)]"""
     if not sessions:
         return "進行中の計画はありません"
@@ -295,4 +293,41 @@ def listing(sessions, at: datetime, r: float) -> str:
         if idle_h >= 24:
             text += f"（{int(idle_h)} 時間更新なし）"
         out.append(f"{branch}{pad(name, nw)}{text}")
+    return "\n".join(out)
+
+
+# --- キャリブレーション -------------------------------------------------------
+
+def calibration(cal, saved_to=None) -> str:
+    f = cal["features"]
+    out = [f"📐 テーマごとの見込みと実績（記録 {f['records']} 手順・{f['plans']} 計画）"]
+    if not f["records"]:
+        out.append("   まだ記録がありません（baro done で手順を完了すると記録されます）")
+    rows = [("テーマ", "手順", "見込み", "実績", "実績÷見込み", "掛ける倍率")]
+    for key, t in f["themes"].items():
+        rows.append((t["label"], str(t["n"]), dur(t["est_min"]), dur(t["actual_min"]),
+                     f"{t['ratio_median']:.2f}（{t['ratio_p25']:.2f}〜{t['ratio_p75']:.2f}）",
+                     f"×{t['correction']:.2f}"))
+    if f["themes"]:
+        widths = [max(dw(r[i]) for r in rows) for i in range(len(rows[0]))]
+        for r in rows:
+            cells = [pad(r[0], widths[0])] + [" " * (widths[i] - dw(r[i])) + r[i] for i in range(1, len(r))]
+            out.append("   " + "  ".join(cells))
+        out.append("   実績÷見込み は中央値（カッコは 25〜75% の範囲）。掛ける倍率は記録の少なさを考えて寄せた値")
+    bt = cal["backtest"]
+    names = {"none": "補正なし", "global": "全体の補正だけ", "theme": "テーマ別"}
+    if bt["none"]["n"]:
+        parts = []
+        for m in ("none", "global", "theme"):
+            mark = " ← 使う" if m == cal["mode"] else ""
+            parts.append(f"{names[m]} ×{bt[m]['error']:.2f}{mark}")
+        out.append(f"過去の記録で予測を試したずれ（{bt['none']['n']} 手順・1.00 が完全に当たり）:")
+        out.append("   " + " ・ ".join(parts))
+    w = cal["weights"]
+    out.append(f"重み（見込みの分）: 履歴 {num(w['history'])}・テーマ {num(w['theme'])}・計画 {num(w['plan'])}")
+    if f["unmatched"]:
+        names_ = "、".join(f["unmatched"][-5:])
+        out.append(f"どのテーマにも入らない手順 {len(f['unmatched'])} 件: {names_}")
+    if saved_to:
+        out.append(f"→ {saved_to} に書きました")
     return "\n".join(out)

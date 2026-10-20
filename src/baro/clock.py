@@ -1,6 +1,6 @@
 """経過・残り・補正・終わる時刻の計算。時刻はすべて引数で受ける。"""
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta
 from typing import List, Optional
 
@@ -9,8 +9,10 @@ ACTIVE = (DOING, WAIT, BLOCK)
 
 RATIO_MIN, RATIO_MAX = 0.1, 3.0
 RATIO_WINDOW = 50
-# 補正の重み（見込みの分）。記録が少ないうちは、履歴の補正は 1.0 に、計画の中の補正は履歴の補正に寄せる。
-HIST_PRIOR_MIN, PLAN_PRIOR_MIN = 20.0, 10.0
+# 補正の重み（見込みの分）。記録が少ないうちは、履歴の補正は 1.0 に、テーマの補正は履歴の補正に、
+# 計画の中の補正はテーマの補正に寄せる。
+HIST_PRIOR_MIN, THEME_PRIOR_MIN, PLAN_PRIOR_MIN = 20.0, 10.0, 10.0
+OTHER = "other"
 
 
 def now() -> datetime:
@@ -88,36 +90,105 @@ def close_span(leaf, at: datetime) -> None:
         leaf["spans"][-1][1] = iso(at)
 
 
-def _shrink(actual: float, est: float, prior: float, weight: float) -> float:
-    """実績÷見込みを、見込み weight 分ぶんの prior と混ぜる（記録が少ないほど prior に近い）。"""
-    r = (actual + prior * weight) / (est + weight)
+def _clamp(r: float) -> float:
     return min(max(r, RATIO_MIN), RATIO_MAX)
 
 
-def ratio(history) -> float:
+def _shrink(actual: float, est: float, prior: float, weight: float) -> float:
+    """実績÷見込みを、見込み weight 分ぶんの prior と混ぜる（記録が少ないほど prior に近い）。"""
+    return _clamp((actual + prior * weight) / (est + weight))
+
+
+def _usable(history):
+    return [h for h in history if h.get("est", 0) > 0 and h.get("actual", 0) > 0]
+
+
+def ratio(history, weight: float = HIST_PRIOR_MIN) -> float:
     """過去の手順の 実績÷見込み（直近 RATIO_WINDOW 手順）。記録が少ないうちは 1.0 に寄せる。"""
-    rows = [h for h in history if h.get("est", 0) > 0 and h.get("actual", 0) > 0]
-    rows = rows[-RATIO_WINDOW:]
-    return _shrink(sum(h["actual"] for h in rows), sum(h["est"] for h in rows), 1.0, HIST_PRIOR_MIN)
+    rows = _usable(history)[-RATIO_WINDOW:]
+    return _shrink(sum(h["actual"] for h in rows), sum(h["est"] for h in rows), 1.0, weight)
 
 
-def plan_ratio(items, at: datetime, r: float) -> float:
-    """この計画で終わった手順の 実績÷見込み を、履歴の補正 r に混ぜる。
+# --- テーマ（手順の種類）ごとの補正 -------------------------------------------
+
+def classify(name: str, themes) -> str:
+    """手順の名前からテーマを決める。themes の先頭から見て、キーワードを 1 つでも含む最初のもの。"""
+    for th in themes:
+        if any(k and k in name for k in th.get("keywords", [])):
+            return th["key"]
+    return OTHER
+
+
+def theme_ratios(history, themes, base: float, weight: float = THEME_PRIOR_MIN) -> dict:
+    """テーマごとの 実績÷見込み（テーマごとに直近 RATIO_WINDOW 手順）。記録が少ないテーマは base に寄せる。"""
+    groups = {}
+    for h in _usable(history):
+        groups.setdefault(classify(h.get("name", ""), themes), []).append(h)
+    out = {}
+    for key, rows in groups.items():
+        rows = rows[-RATIO_WINDOW:]
+        out[key] = _shrink(sum(h["actual"] for h in rows), sum(h["est"] for h in rows), base, weight)
+    return out
+
+
+@dataclass
+class Ratios:
+    """手順ごとの補正の倍率。テーマの倍率（無ければ base）× 計画の中の倍率 plan。"""
+    base: float = 1.0
+    by_theme: dict = field(default_factory=dict)
+    themes: list = field(default_factory=list)
+    plan: float = 1.0
+    plan_weight: float = PLAN_PRIOR_MIN
+
+    def theme_of(self, leaf) -> str:
+        return classify(leaf.get("name", ""), self.themes)
+
+    def raw(self, leaf) -> float:
+        """計画の中の倍率を掛ける前の倍率。"""
+        return self.by_theme.get(self.theme_of(leaf), self.base)
+
+    def of(self, leaf) -> float:
+        return _clamp(self.raw(leaf) * self.plan)
+
+
+def rate(r, leaf) -> float:
+    """手順の補正の倍率。r は数か Ratios。"""
+    return r.of(leaf) if isinstance(r, Ratios) else r
+
+
+def plan_ratio(items, at: datetime, r):
+    """この計画で終わった手順の実績を、補正に混ぜる。
 
     見込みの癖は依頼ごとに違うので、同じ計画の実績がいちばん当たる（過去の記録での比較で、
     履歴だけの補正より予測と実績のずれが小さかった）。
+    r が数なら 実績÷見込み を見込み PLAN_PRIOR_MIN 分ぶんの r と混ぜた数を、
+    Ratios なら 実績÷（見込み×テーマの倍率）を同じように 1.0 に寄せた倍率を plan に入れて返す
+    （テーマを使わないときは数のときと同じ値になる）。
     """
     done = [lf for lf in leaves(items) if lf["state"] == DONE and float(lf["est_min"]) > 0]
     actual = sum(elapsed_min(lf, at) for lf in done)
-    est = sum(float(lf["est_min"]) for lf in done)
-    return _shrink(actual, est, r, PLAN_PRIOR_MIN)
+    if not isinstance(r, Ratios):
+        return _shrink(actual, sum(float(lf["est_min"]) for lf in done), r, PLAN_PRIOR_MIN)
+    pred = sum(float(lf["est_min"]) * r.raw(lf) for lf in done)
+    prior = r.base * r.plan_weight
+    return replace(r, plan=(actual + prior) / (pred + prior))
 
 
-def leaf_remaining(leaf, at: datetime, r: float) -> float:
+def effective_ratio(items, r) -> float:
+    """表示用の補正の倍率（まだ終わっていない手順の、見込みで重みを付けた平均）。"""
+    lv = [lf for lf in leaves(items) if lf["state"] not in (DONE, SKIP)]
+    lv = lv or [lf for lf in leaves(items) if lf["state"] != SKIP]
+    est = sum(float(lf["est_min"]) for lf in lv)
+    if est <= 0:
+        return rate(r, lv[0]) if lv else 1.0
+    return sum(float(lf["est_min"]) * rate(r, lf) for lf in lv) / est
+
+
+def leaf_remaining(leaf, at: datetime, r) -> float:
     st = leaf["state"]
     if st in (DONE, SKIP):
         return 0.0
-    est = float(leaf["est_min"]) * r
+    est = float(leaf["est_min"]) * rate(r, leaf)
     if leaf.get("spans") or st in ACTIVE:
         return max(est - elapsed_min(leaf, at), 1.0)
     return est
@@ -137,7 +208,7 @@ class Totals:
         return self.elapsed / self.total if self.total > 0 else 1.0
 
 
-def totals(items, at: datetime, r: float) -> Totals:
+def totals(items, at: datetime, r) -> Totals:
     el = rem = 0.0
     for lf in leaves(items):
         if lf["state"] == SKIP:
@@ -151,7 +222,7 @@ def totals(items, at: datetime, r: float) -> Totals:
 class Summary:
     title: str
     at: datetime
-    ratio: float
+    ratio: object  # 数か Ratios
     elapsed: float
     remaining: float
     finish: datetime
@@ -175,7 +246,7 @@ class Summary:
         return self.elapsed / self.total if self.total > 0 else 0.0
 
 
-def summarize(data, at: datetime, r: float) -> Summary:
+def summarize(data, at: datetime, r) -> Summary:
     items = data["items"]
     t = totals(items, at, r)
     lv = [lf for lf in leaves(items) if lf["state"] != SKIP]
