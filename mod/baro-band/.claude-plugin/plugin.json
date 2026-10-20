@@ -1,7 +1,7 @@
 {
   "name": "baro-band",
-  "version": "0.1.0",
-  "description": "baro の残り時間の 1 行を、入力欄の上の帯に出す（Desktop の Code タブ向け）",
+  "version": "0.2.0",
+  "description": "baro の残り時間の 1 行と使用量（枠・コンテキスト・費用）を、入力欄の上の帯に出す",
   "author": {
     "name": "Kosuke Akizuki"
   },

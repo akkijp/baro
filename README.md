@@ -10,7 +10,7 @@ Claude Code に仕事を頼んだとき、**あと何分待てばよいか**を�
 
 Claude が作業の最初に「段階 › 手順」の木と手順ごとの見込み時間を宣言し、手順を終えるたびに進めます。
 baro はそれを集計し、残り時間・終了予定時刻・進み具合のバーをステータスラインと返信に出します。
-Claude Desktop の Code タブでは、入力欄の上の帯に同じ 1 行を出します。
+Claude Desktop の Code タブでは、入力欄の上の帯に同じ 1 行と、使用量（5 時間枠・週・コンテキスト・費用）の行を出します。
 
 *baro shows "how many minutes until Claude Code is done" in the status line (or above the prompt in the Claude Desktop Code tab). Japanese UI only for now.*
 
