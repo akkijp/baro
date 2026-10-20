@@ -114,8 +114,8 @@ def hook(args) -> None:
 
     if args.event == "prompt":
         text = (f"[baro] 進行中の計画「{data.get('title')}」: {render.line(data, at, r)}\n"
-                "手順を始めるときは baro start <番号>、終えたら baro done <番号>。"
-                "返信の先頭に baro show --line の 1 行を出す。計画と関係のない短い質問なら更新しなくてよい。")
+                "手順を始めるとき baro start <番号>、終えたら baro done <番号>。"
+                "返信の先頭に baro show --line の 1 行。計画と関係ない短い質問なら更新しなくてよい。")
         print(json.dumps({"hookSpecificOutput": {"hookEventName": "UserPromptSubmit",
                                                  "additionalContext": text}}, ensure_ascii=False))
 
@@ -128,7 +128,7 @@ HOOKS = (("Stop", "stop"), ("UserPromptSubmit", "prompt"))
 def _baro_bin() -> str:
     found = shutil.which("baro")
     if not found:
-        raise SystemExit("baro: PATH に baro がありません。先に uv tool install -e <baro のフォルダ> を実行してください")
+        raise SystemExit("baro: PATH に baro がありません。入れた場所（uv / pipx なら ~/.local/bin）を PATH に足してください")
     return found
 
 
@@ -156,7 +156,7 @@ def setup(args) -> None:
             kept = [e for e in entries if not _has_baro_hook([e])]
             if len(kept) != len(entries):
                 settings["hooks"][event] = kept
-                changes.append(f"hooks.{event} から baro を削除する")
+                changes.append(f"hooks.{event} から baro を外す")
         skill = "remove" if calib.skill_path().exists() else None
     else:
         baro = _baro_bin()
@@ -164,22 +164,22 @@ def setup(args) -> None:
         if "baro statusline" not in cur.get("command", ""):
             cfg["statusline_chain"] = cur.get("command")
             settings["statusLine"] = {**({"type": "command"} | cur), "command": f"{baro} statusline"}
-            changes.append(f"statusLine を {baro} statusline に変更する"
-                           + ("（元の command は baro の config.json に保存し、同じ入力を渡し続けます）"
+            changes.append(f"statusLine を {baro} statusline にする"
+                           + ("（元の command は ~/.claude/baro/config.json に保存し、同じ入力を渡し続ける）"
                               if cur.get("command") else ""))
         hooks = settings.setdefault("hooks", {})
         for event, arg in HOOKS:
             entries = hooks.setdefault(event, [])
             if not _has_baro_hook(entries):
                 entries.append({"hooks": [{"type": "command", "command": f"{baro} hook {arg}", "timeout": 5}]})
-                changes.append(f"hooks.{event} に {baro} hook {arg} を追加する（既存のフックはそのまま）")
+                changes.append(f"hooks.{event} に {baro} hook {arg} を足す（既存のフックはそのまま）")
         skill = None if calib.skill_installed() else "install"
 
     settings_changed = bool(changes)
     if skill == "install":
-        changes.append(f"{calib.skill_path().parent} に /{calib.SKILL_NAME} スキル（見込みの補正を詰める）を入れる")
+        changes.append(f"{calib.skill_path().parent} に /{calib.SKILL_NAME} スキルを入れる")
     elif skill == "remove":
-        changes.append(f"{calib.skill_path().parent}（/{calib.SKILL_NAME} スキル）を削除する")
+        changes.append(f"{calib.skill_path().parent}（/{calib.SKILL_NAME} スキル）を消す")
 
     if not changes:
         print("変更はありません")
@@ -188,7 +188,7 @@ def setup(args) -> None:
     for c in changes:
         print(f"  ・{c}")
     if not args.apply:
-        print("（まだ書き換えていません。--apply を付けると書き換えます）")
+        print("まだ書き換えていません。--apply を付けると書き換えます")
         return
     if skill == "install":
         calib.install_skill()
@@ -204,7 +204,7 @@ def setup(args) -> None:
     if not args.undo:
         store.save_config(cfg)
     path.write_text(json.dumps(settings, indent=2, ensure_ascii=False) + "\n", "utf-8")
-    print("書き換えました。ステータスラインが次に更新されたときから有効です")
+    print("書き換えました。Claude Code を起動し直すと有効になります")
 
 
 def doctor(args) -> None:
@@ -220,19 +220,19 @@ def doctor(args) -> None:
     settings = json.loads(path.read_text("utf-8")) if path.exists() else {}
     cmd = (settings.get("statusLine") or {}).get("command", "")
     check("baro statusline" in cmd, "statusLine は baro",
-          "statusLine が baro になっていません（Orca などの更新で戻された可能性があります。baro setup --apply で再設定）")
+          "statusLine が baro になっていません（baro setup --apply）")
     for event, _ in HOOKS:
         check(_has_baro_hook(settings.get("hooks", {}).get(event, [])),
               f"hooks.{event} に baro", f"hooks.{event} に baro がありません（baro setup --apply）")
     chain = store.load_config().get("statusline_chain")
-    print("    元の statusLine: " + ("保存あり（同じ入力を渡しています）" if chain else "なし"))
+    print("    元の statusLine: " + ("保存あり（同じ入力を渡している）" if chain else "なし"))
     md = Path.home() / ".claude" / "CLAUDE.md"
     check(md.exists() and "baro" in md.read_text("utf-8"), "CLAUDE.md に baro のルール",
           "CLAUDE.md に baro のルールがありません（baro rules --install）")
     check(calib.skill_installed(), f"/{calib.SKILL_NAME} スキル（{calib.skill_path().parent}）",
-          f"/{calib.SKILL_NAME} スキルが入っていないか古くなっています（baro setup --apply か baro skill --install）")
-    print("    補正の設定: " + (f"{calib.path()}" if calib.path().exists() else "まだ作っていません（最初の表示で作ります）"))
+          f"/{calib.SKILL_NAME} スキルが無いか古くなっています（baro setup --apply か baro skill --install）")
+    print("    補正の設定: " + (f"{calib.path()}" if calib.path().exists() else "まだありません（最初の表示で作ります）"))
     sid = os.environ.get("CLAUDE_CODE_SESSION_ID")
-    print("    このシェルのセッション: " + (sid or "（Claude Code の外で実行）"))
+    print("    このシェルのセッション: " + (sid or "なし（Claude Code の外）"))
     if not ok:
         sys.exit(1)
