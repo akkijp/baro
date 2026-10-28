@@ -2,6 +2,7 @@
 
 import argparse
 import json
+import math
 import os
 import pathlib
 import re
@@ -340,9 +341,9 @@ def cmd_stats(args):
         print("まだ記録がありません（baro done で手順を完了すると記録されます）")
         return
     recent = rows[-clock.RATIO_WINDOW:]
-    raw = sum(h["actual"] for h in recent) / sum(h["est"] for h in recent)
+    raw = math.exp(sum(clock.log_ratio(h["actual"], h["est"]) for h in recent) / len(recent))
     print(f"記録 {len(rows)} 手順（補正に使うのは直近 {len(recent)} 手順）")
-    print(f"実績 ÷ 見込み = {raw:.2f} 倍 → 全体の補正 ×{r:.2f}（記録が少ないうちは 1.0 に寄せる）")
+    print(f"実績 ÷ 見込み = {raw:.2f} 倍（幾何平均）→ 全体の補正 ×{r:.2f}（記録が少ないうちは 1.0 に寄せる）")
     ok = sum(1 for h in recent if h["actual"] <= h["est"] + 0.5)
     print(f"見込みどおり {ok}/{len(recent)} 手順")
     print("テーマごとの補正は baro calibrate で見る")
@@ -530,7 +531,7 @@ def build_parser():
     a.set_defaults(fn=hooks.statusline)
 
     a = sub.add_parser("hook", help="（Claude Code のフックから呼ぶ）")
-    a.add_argument("event", choices=["stop", "prompt"])
+    a.add_argument("event", choices=["stop", "prompt", "ask", "answered"])
     a.set_defaults(fn=hooks.hook)
 
     a = sub.add_parser("setup", help="Claude Code の設定に baro を組み込む")

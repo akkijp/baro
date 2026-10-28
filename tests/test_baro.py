@@ -104,11 +104,15 @@ class ClockTest(unittest.TestCase):
 
     def test_ratio(self):
         self.assertEqual(clock.ratio([]), 1.0)
-        # 記録が少ないうちは 1.0 に寄せ、増えるほど実績の倍率に近づく
-        self.assertAlmostEqual(clock.ratio([{"est": 10, "actual": 20}] * 2), (40 + 20) / (20 + 20))
-        self.assertAlmostEqual(clock.ratio([{"est": 10, "actual": 20}] * 50), (1000 + 20) / (500 + 20))
+        # 記録が少ないうちは 1.0 に寄せ、増えるほど実績の倍率（幾何平均）に近づく
+        self.assertAlmostEqual(clock.ratio([{"est": 10, "actual": 20}] * 2), 2 ** (2 / (2 + 5)))
+        self.assertAlmostEqual(clock.ratio([{"est": 10, "actual": 20}] * 50), 2 ** (50 / (50 + 5)))
         self.assertEqual(clock.ratio([{"est": 10, "actual": 100}] * 50), clock.RATIO_MAX)
         self.assertEqual(clock.ratio([{"est": 10, "actual": 0.1}] * 50), clock.RATIO_MIN)
+        # 人の待ちで 1 件だけ何倍にも延びても、合計の比のようには引きずられない
+        hist = [{"est": 10, "actual": 1}] * 20 + [{"est": 10, "actual": 200}]
+        self.assertLess(clock.ratio(hist), 0.2)
+        self.assertGreater(sum(h["actual"] for h in hist) / sum(h["est"] for h in hist), 1.0)
 
     def test_plan_ratio(self):
         # 終わった手順が無ければ履歴の補正のまま
@@ -116,7 +120,7 @@ class ClockTest(unittest.TestCase):
         self.assertAlmostEqual(clock.plan_ratio(todo, at(0), 1.2), 1.2)
         # 10 分の見込みを 2 分で終えた計画は、履歴の補正 1.0 より小さく見積もる
         done = [self.leaf(10, [(at(0), at(2))], clock.DONE), self.leaf(10, [], clock.TODO)]
-        self.assertAlmostEqual(clock.plan_ratio(done, at(2), 1.0), (2 + 1.0 * 10) / (10 + 10))
+        self.assertAlmostEqual(clock.plan_ratio(done, at(2), 1.0), 0.2 ** (1 / (1 + 5)))
 
     def test_pause_does_not_count(self):
         data = {"items": [self.leaf(10, [(at(0), None)], clock.DOING)]}
@@ -151,8 +155,8 @@ class ThemeTest(unittest.TestCase):
         hist = [rec("テストを通す", 10, 30)] * 5 + [rec("画面を作る", 10, 2)] * 5
         base = clock.ratio(hist)
         tr = clock.theme_ratios(hist, THEMES, base)
-        self.assertAlmostEqual(tr["test"], (150 + base * 10) / (50 + 10))
-        self.assertAlmostEqual(tr["build"], (10 + base * 10) / (50 + 10))
+        self.assertAlmostEqual(tr["test"], (3.0 ** 5 * base ** 5) ** (1 / 10))
+        self.assertAlmostEqual(tr["build"], (0.2 ** 5 * base ** 5) ** (1 / 10))
         r = calib.ratios(hist, {})
         self.assertGreater(r.of(self.leaf("テストを足す", 10)), r.of(self.leaf("画面を作る", 10)))
         # 記録の無いテーマは全体の倍率
@@ -254,6 +258,21 @@ class FlowTest(Env):
         lf = clock.find(self.data()["items"], "2.2")
         self.assertEqual(lf["state"], clock.DOING)
         self.assertAlmostEqual(clock.elapsed_min(lf, self.t), 8)
+
+        # Claude が AskUserQuestion で聞いている間も返事待ち（待った時間は実績に入れない）
+        self.run_hook(hooks.hook, mock.Mock(event="ask"),
+                      {"session_id": "sess-1", "tool_name": "AskUserQuestion",
+                       "tool_input": {"questions": [{"question": "どちらの案にしますか"}]}})
+        self.assertEqual((self.data().get("paused") or {}).get("kind"), "wait")
+        self.assertEqual(clock.find(self.data()["items"], "2.2")["state"], clock.WAIT)
+        self.t = at(51)
+        _, line, _ = self.run_cli("show", "--line")
+        self.assertIn("🙋 回答待ち: どちらの案にしますか", line)
+        self.run_hook(hooks.hook, mock.Mock(event="answered"), {"session_id": "sess-1", "tool_name": "AskUserQuestion"})
+        self.t = at(52)
+        lf = clock.find(self.data()["items"], "2.2")
+        self.assertEqual(lf["state"], clock.DOING)
+        self.assertAlmostEqual(clock.elapsed_min(lf, self.t), 8 + 1)  # 41→51 の待ちは数えない
 
         # Claude の応答が終わったら止まった扱い
         self.run_hook(hooks.hook, mock.Mock(event="stop"), {"session_id": "sess-1"})
@@ -383,13 +402,16 @@ class FlowTest(Env):
             s = json.loads(path.read_text())
             self.assertEqual(s["statusLine"]["command"], "/x/baro statusline")
             self.assertEqual(len(s["hooks"]["Stop"]), 2)
+            self.assertEqual(s["hooks"]["PreToolUse"], [{"matcher": "AskUserQuestion", "hooks": [
+                {"type": "command", "command": "/x/baro hook ask", "timeout": 5}]}])
             self.assertEqual(store.load_config()["statusline_chain"], "orca-statusline")
             self.assertTrue(calib.skill_installed())  # スキルも入れる
             _, out, _ = self.run_cli("setup", "--apply")
             self.assertIn("変更はありません", out)
             self.run_cli("setup", "--undo", "--apply")
         self.assertFalse(calib.skill_path().exists())
-        self.assertEqual(json.loads(path.read_text()), {**orig, "hooks": {**orig["hooks"], "UserPromptSubmit": []}})
+        self.assertEqual(json.loads(path.read_text()),
+                         {**orig, "hooks": {**orig["hooks"], "UserPromptSubmit": [], "PreToolUse": [], "PostToolUse": []}})
 
 
 if __name__ == "__main__":

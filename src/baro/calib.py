@@ -40,8 +40,8 @@ DEFAULT_THEMES = [
      "keywords": ["書く", "足す", "直す", "作る", "実装", "変える", "付ける", "組み立て", "組み込", "消す", "加える",
                   "取り入れ", "入れる", "出す", "整える", "設計", "決める", "抽出"]},
 ]
-DEFAULT_WEIGHTS = {"history": clock.HIST_PRIOR_MIN, "theme": clock.THEME_PRIOR_MIN, "plan": clock.PLAN_PRIOR_MIN}
-GRID = (5.0, 10.0, 20.0, 40.0)
+DEFAULT_WEIGHTS = {"history": clock.HIST_PRIOR_N, "theme": clock.THEME_PRIOR_N, "plan": clock.PLAN_PRIOR_N}
+GRID = (2.0, 5.0, 10.0, 20.0)
 MIN_RECORDS_TO_TUNE = 20   # これより少ない記録では重みを変えない
 TUNE_GAIN = 0.97           # 既定の重みよりずれが 3% 以上小さいときだけ重みを変える
 BACKTEST_MAX = 300         # 比べるのは直近この数の手順まで
@@ -141,19 +141,15 @@ def _plan_key(h):
 
 
 class _Window:
-    """直近 RATIO_WINDOW 手順の 見込みと実績の合計。"""
+    """直近 RATIO_WINDOW 手順の log(実績÷見込み)。"""
 
     def __init__(self):
-        self.rows, self.est, self.actual = [], 0.0, 0.0
+        self.logs = []
 
     def add(self, h):
-        self.rows.append(h)
-        self.est += h["est"]
-        self.actual += h["actual"]
-        if len(self.rows) > clock.RATIO_WINDOW:
-            old = self.rows.pop(0)
-            self.est -= old["est"]
-            self.actual -= old["actual"]
+        self.logs.append(clock.log_ratio(h["actual"], h["est"]))
+        if len(self.logs) > clock.RATIO_WINDOW:
+            self.logs.pop(0)
 
 
 def _errors(rows, keys, weights, mode):
@@ -168,16 +164,15 @@ def _errors(rows, keys, weights, mode):
             if mode == "none":
                 pred = h["est"]
             else:
-                base = clock._shrink(allw.actual, allw.est, 1.0, weights["history"])
+                base = clock._shrink(allw.logs, 1.0, weights["history"])
 
                 def raw(k):
                     w = by_key.get(k) if mode == "theme" else None
-                    return clock._shrink(w.actual, w.est, base, weights["theme"]) if w else base
+                    return clock._shrink(w.logs, base, weights["theme"]) if w else base
                 same = plans.get(_plan_key(h), [])
-                actual = sum(p["actual"] for p, _ in same)
-                planned = sum(p["est"] * raw(k) for p, k in same)
-                prior = base * weights["plan"]
-                pred = h["est"] * clock._clamp(raw(key) * (actual + prior) / (planned + prior))
+                logs = [clock.log_ratio(p["actual"], p["est"] * raw(k)) for p, k in same]
+                plan = math.exp(sum(logs) / (len(logs) + weights["plan"]))
+                pred = h["est"] * clock._clamp(raw(key) * plan)
             out.append(abs(math.log(pred / h["actual"])))
         allw.add(h)
         by_key.setdefault(key, _Window()).add(h)
@@ -252,7 +247,8 @@ def features(history, themes, weights) -> dict:
             "n": len(g),
             "est_min": round(est, 2),
             "actual_min": round(act, 2),
-            "ratio_sum": round(act / est, 3),          # Σ実績 ÷ Σ見込み
+            "ratio_sum": round(act / est, 3),          # Σ実績 ÷ Σ見込み（長い手順に引きずられる。参考値）
+            "ratio_geomean": round(math.exp(statistics.fmean(map(math.log, rs))), 3),  # 幾何平均（補正の元）
             "ratio_median": round(statistics.median(rs), 3),
             "ratio_p25": round(_q(rs, 0.25), 3),
             "ratio_p75": round(_q(rs, 0.75), 3),
@@ -271,6 +267,7 @@ def features(history, themes, weights) -> dict:
             "est_min": round(sum(h["est"] for h in rows), 2),
             "actual_min": round(sum(h["actual"] for h in rows), 2),
             "ratio_sum": round(sum(h["actual"] for h in rows) / sum(h["est"] for h in rows), 3) if rows else None,
+            "ratio_geomean": round(math.exp(statistics.fmean(clock.log_ratio(h["actual"], h["est"]) for h in rows)), 3) if rows else None,
             "correction": round(base, 3),
         },
         "themes": out,

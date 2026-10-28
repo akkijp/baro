@@ -1,5 +1,6 @@
 """経過・残り・補正・終わる時刻の計算。時刻はすべて引数で受ける。"""
 
+import math
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta
 from typing import List, Optional
@@ -7,11 +8,11 @@ from typing import List, Optional
 DONE, DOING, TODO, WAIT, BLOCK, SKIP = "done", "doing", "todo", "wait", "block", "skip"
 ACTIVE = (DOING, WAIT, BLOCK)
 
-RATIO_MIN, RATIO_MAX = 0.1, 3.0
-RATIO_WINDOW = 50
-# 補正の重み（見込みの分）。記録が少ないうちは、履歴の補正は 1.0 に、テーマの補正は履歴の補正に、
+RATIO_MIN, RATIO_MAX = 0.05, 3.0
+RATIO_WINDOW = 100
+# 補正の重み（仮の手順の数）。記録が少ないうちは、履歴の補正は 1.0 に、テーマの補正は履歴の補正に、
 # 計画の中の補正はテーマの補正に寄せる。
-HIST_PRIOR_MIN, THEME_PRIOR_MIN, PLAN_PRIOR_MIN = 20.0, 10.0, 10.0
+HIST_PRIOR_N, THEME_PRIOR_N, PLAN_PRIOR_N = 5.0, 5.0, 5.0
 OTHER = "other"
 
 
@@ -94,19 +95,29 @@ def _clamp(r: float) -> float:
     return min(max(r, RATIO_MIN), RATIO_MAX)
 
 
-def _shrink(actual: float, est: float, prior: float, weight: float) -> float:
-    """実績÷見込みを、見込み weight 分ぶんの prior と混ぜる（記録が少ないほど prior に近い）。"""
-    return _clamp((actual + prior * weight) / (est + weight))
+def log_ratio(actual: float, est: float) -> float:
+    return math.log(actual / est)
+
+
+def _shrink(logs, prior: float, weight: float) -> float:
+    """実績÷見込みの幾何平均（log の平均）を、仮の手順 weight 件ぶんの prior と混ぜる（記録が少ないほど prior に近い）。
+
+    合計の比（Σ実績 ÷ Σ見込み）にしないのは、人の返事や機械の処理を待って何倍にも延びた少数の手順に
+    倍率が引きずられるため（この PC の記録では合計の比が中央値の 2 倍になっていた）。
+    log の平均は、予測のずれを測る |log(予測/実績)| と同じ尺度で、その平均を最小にする値。
+    """
+    logs = list(logs)
+    return _clamp(math.exp((sum(logs) + math.log(prior) * weight) / (len(logs) + weight)))
 
 
 def _usable(history):
     return [h for h in history if h.get("est", 0) > 0 and h.get("actual", 0) > 0]
 
 
-def ratio(history, weight: float = HIST_PRIOR_MIN) -> float:
-    """過去の手順の 実績÷見込み（直近 RATIO_WINDOW 手順）。記録が少ないうちは 1.0 に寄せる。"""
+def ratio(history, weight: float = HIST_PRIOR_N) -> float:
+    """過去の手順の 実績÷見込みの幾何平均（直近 RATIO_WINDOW 手順）。記録が少ないうちは 1.0 に寄せる。"""
     rows = _usable(history)[-RATIO_WINDOW:]
-    return _shrink(sum(h["actual"] for h in rows), sum(h["est"] for h in rows), 1.0, weight)
+    return _shrink((log_ratio(h["actual"], h["est"]) for h in rows), 1.0, weight)
 
 
 # --- テーマ（手順の種類）ごとの補正 -------------------------------------------
@@ -119,15 +130,15 @@ def classify(name: str, themes) -> str:
     return OTHER
 
 
-def theme_ratios(history, themes, base: float, weight: float = THEME_PRIOR_MIN) -> dict:
-    """テーマごとの 実績÷見込み（テーマごとに直近 RATIO_WINDOW 手順）。記録が少ないテーマは base に寄せる。"""
+def theme_ratios(history, themes, base: float, weight: float = THEME_PRIOR_N) -> dict:
+    """テーマごとの 実績÷見込みの幾何平均（テーマごとに直近 RATIO_WINDOW 手順）。記録が少ないテーマは base に寄せる。"""
     groups = {}
     for h in _usable(history):
         groups.setdefault(classify(h.get("name", ""), themes), []).append(h)
     out = {}
     for key, rows in groups.items():
         rows = rows[-RATIO_WINDOW:]
-        out[key] = _shrink(sum(h["actual"] for h in rows), sum(h["est"] for h in rows), base, weight)
+        out[key] = _shrink((log_ratio(h["actual"], h["est"]) for h in rows), base, weight)
     return out
 
 
@@ -138,7 +149,7 @@ class Ratios:
     by_theme: dict = field(default_factory=dict)
     themes: list = field(default_factory=list)
     plan: float = 1.0
-    plan_weight: float = PLAN_PRIOR_MIN
+    plan_weight: float = PLAN_PRIOR_N
 
     def theme_of(self, leaf) -> str:
         return classify(leaf.get("name", ""), self.themes)
@@ -161,17 +172,16 @@ def plan_ratio(items, at: datetime, r):
 
     見込みの癖は依頼ごとに違うので、同じ計画の実績がいちばん当たる（過去の記録での比較で、
     履歴だけの補正より予測と実績のずれが小さかった）。
-    r が数なら 実績÷見込み を見込み PLAN_PRIOR_MIN 分ぶんの r と混ぜた数を、
+    r が数なら 実績÷見込み の幾何平均を仮の手順 PLAN_PRIOR_N 件ぶんの r と混ぜた数を、
     Ratios なら 実績÷（見込み×テーマの倍率）を同じように 1.0 に寄せた倍率を plan に入れて返す
     （テーマを使わないときは数のときと同じ値になる）。
     """
-    done = [lf for lf in leaves(items) if lf["state"] == DONE and float(lf["est_min"]) > 0]
-    actual = sum(elapsed_min(lf, at) for lf in done)
+    done = [(lf, elapsed_min(lf, at)) for lf in leaves(items) if lf["state"] == DONE and float(lf["est_min"]) > 0]
+    done = [(lf, a) for lf, a in done if a > 0]
     if not isinstance(r, Ratios):
-        return _shrink(actual, sum(float(lf["est_min"]) for lf in done), r, PLAN_PRIOR_MIN)
-    pred = sum(float(lf["est_min"]) * r.raw(lf) for lf in done)
-    prior = r.base * r.plan_weight
-    return replace(r, plan=(actual + prior) / (pred + prior))
+        return _shrink((log_ratio(a, float(lf["est_min"])) for lf, a in done), r, PLAN_PRIOR_N)
+    logs = [log_ratio(a, float(lf["est_min"]) * r.raw(lf)) for lf, a in done]
+    return replace(r, plan=math.exp(sum(logs) / (len(logs) + r.plan_weight)))
 
 
 def effective_ratio(items, r) -> float:
