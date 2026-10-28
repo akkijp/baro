@@ -1,4 +1,4 @@
-"""Claude Code とのつなぎ口（statusLine・Stop / UserPromptSubmit フック・設定の書き換え）。"""
+"""Claude Code とのつなぎ口（statusLine・Stop / UserPromptSubmit / AskUserQuestion フック・設定の書き換え）。"""
 
 import json
 import os
@@ -9,6 +9,7 @@ import time
 from pathlib import Path
 
 from . import calib, clock, render, store
+from .clock import DOING, WAIT
 
 HIDE_DONE_AFTER_SEC = 600  # 終わった計画は 10 分でステータスラインから消す
 
@@ -85,6 +86,12 @@ def _is_notification(payload: dict) -> bool:
     return str(payload.get("prompt") or "").lstrip().startswith("<task-notification>")
 
 
+def _first_question(payload: dict) -> str:
+    qs = (payload.get("tool_input") or {}).get("questions") or []
+    q = qs[0].get("question", "") if qs and isinstance(qs[0], dict) else ""
+    return str(q)[:80]
+
+
 def hook(args) -> None:
     payload = _read_payload(sys.stdin.buffer.read())
     sid = payload.get("session_id")
@@ -105,6 +112,15 @@ def hook(args) -> None:
         if args.event == "stop":
             if not data.get("paused"):
                 clock.pause(data, at, "stopped")
+        elif args.event == "ask":
+            # Claude が人に聞いている間（AskUserQuestion）は返事待ち。待った時間を手順の実績に入れない
+            if not data.get("paused"):
+                question = _first_question(payload)
+                for lf in clock.leaves(data["items"]):
+                    if lf["state"] == DOING:
+                        lf["state"] = WAIT
+                        lf["note"] = question
+                clock.pause(data, at, "wait", question=question)
         elif _is_notification(payload) and (data.get("paused") or {}).get("kind") == "wait":
             pass  # 回答待ちは人の返事でだけ解く（バックグラウンドの完了通知などでは解かない）
         else:
@@ -122,7 +138,9 @@ def hook(args) -> None:
 
 # --- 設定 ---------------------------------------------------------------------
 
-HOOKS = (("Stop", "stop"), ("UserPromptSubmit", "prompt"))
+# (イベント, baro hook の引数, matcher)。AskUserQuestion の前後で返事待ちにし、待った時間を実績に入れない
+HOOKS = (("Stop", "stop", None), ("UserPromptSubmit", "prompt", None),
+         ("PreToolUse", "ask", "AskUserQuestion"), ("PostToolUse", "answered", "AskUserQuestion"))
 
 
 def _baro_bin() -> str:
@@ -151,7 +169,7 @@ def setup(args) -> None:
             else:
                 settings.pop("statusLine", None)
             changes.append("statusLine を元に戻す")
-        for event, _ in HOOKS:
+        for event, _, _ in HOOKS:
             entries = settings.get("hooks", {}).get(event, [])
             kept = [e for e in entries if not _has_baro_hook([e])]
             if len(kept) != len(entries):
@@ -168,10 +186,13 @@ def setup(args) -> None:
                            + ("（元の command は ~/.claude/baro/config.json に保存し、同じ入力を渡し続ける）"
                               if cur.get("command") else ""))
         hooks = settings.setdefault("hooks", {})
-        for event, arg in HOOKS:
+        for event, arg, matcher in HOOKS:
             entries = hooks.setdefault(event, [])
             if not _has_baro_hook(entries):
-                entries.append({"hooks": [{"type": "command", "command": f"{baro} hook {arg}", "timeout": 5}]})
+                entry = {"hooks": [{"type": "command", "command": f"{baro} hook {arg}", "timeout": 5}]}
+                if matcher:
+                    entry = {"matcher": matcher, **entry}
+                entries.append(entry)
                 changes.append(f"hooks.{event} に {baro} hook {arg} を足す（既存のフックはそのまま）")
         skill = None if calib.skill_installed() else "install"
 
@@ -221,7 +242,7 @@ def doctor(args) -> None:
     cmd = (settings.get("statusLine") or {}).get("command", "")
     check("baro statusline" in cmd, "statusLine は baro",
           "statusLine が baro になっていません（baro setup --apply）")
-    for event, _ in HOOKS:
+    for event, _, _ in HOOKS:
         check(_has_baro_hook(settings.get("hooks", {}).get(event, [])),
               f"hooks.{event} に baro", f"hooks.{event} に baro がありません（baro setup --apply）")
     chain = store.load_config().get("statusline_chain")

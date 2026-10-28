@@ -24,6 +24,7 @@ Claude Code を起動し直すと有効になります。
 - `statusLine` を `baro statusline` にする。別の statusLine が設定済みなら、その command を `~/.claude/baro/config.json` に保存し、同じ入力を渡し続けます（画面の表示は baro の行に置き換わります）。
 - `Stop` フックに `baro hook stop` を足す（Claude の応答が終わったら計測を止める）。
 - `UserPromptSubmit` フックに `baro hook prompt` を足す（次の入力で計測を再開し、進行中の計画を Claude に知らせる）。
+- `PreToolUse` / `PostToolUse` フック（matcher `AskUserQuestion`）に `baro hook ask` / `baro hook answered` を足す（Claude が選択肢で聞いている間を回答待ちにし、人が考えた時間を手順の実績に入れない）。
 - `~/.claude/skills/baro-calibration/` に `/baro-calibration` スキルを入れる（[見込みの補正](calibration.md)）。
 
 既存のフックはそのまま残ります。`baro rules --install` が追記する文面は `baro rules` で見られます。CLAUDE.md を自分で管理しているなら、その文面を好きな場所に貼ってください。

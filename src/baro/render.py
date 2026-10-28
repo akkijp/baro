@@ -313,7 +313,7 @@ def calibration(cal, saved_to=None) -> str:
         for r in rows:
             cells = [pad(r[0], widths[0])] + [" " * (widths[i] - dw(r[i])) + r[i] for i in range(1, len(r))]
             out.append("   " + "  ".join(cells))
-        out.append("   実績÷見込み は中央値（カッコ内は 25〜75% の範囲）。補正は記録が少ないテーマほど全体の値に寄せた倍率")
+        out.append("   実績÷見込み は中央値（カッコ内は 25〜75% の範囲）。補正は幾何平均を、記録が少ないテーマほど全体の値に寄せた倍率")
     bt = cal["backtest"]
     names = {"none": "補正なし", "global": "全体の補正だけ", "theme": "テーマ別"}
     if bt["none"]["n"]:
@@ -324,7 +324,7 @@ def calibration(cal, saved_to=None) -> str:
         out.append(f"過去の記録で予測したときのずれ（{bt['none']['n']} 手順・1.00 なら誤差なし）:")
         out.append("   " + " ・ ".join(parts))
     w = cal["weights"]
-    out.append(f"重み（見込みの分）: 履歴 {num(w['history'])}・テーマ {num(w['theme'])}・計画 {num(w['plan'])}")
+    out.append(f"重み（仮の手順の数）: 履歴 {num(w['history'])}・テーマ {num(w['theme'])}・計画 {num(w['plan'])}")
     if f["unmatched"]:
         names_ = "、".join(f["unmatched"][-5:])
         out.append(f"どのテーマにも入らない手順 {len(f['unmatched'])} 件: {names_}")
